@@ -41,15 +41,21 @@ def plan(turn: Turn) -> dict[int, dict]:
                     if candidate.unit_id not in used_weapons
                 ),
             )
-        if weapon is None:
-            continue
-        used_weapons.add(weapon.unit_id)
-        if distance(controller.pos, weapon.pos) <= 1:
+        if weapon is not None:
+            used_weapons.add(weapon.unit_id)
+            target = weapon.pos
+        else:
+            # 武器尚未建满时也不能让角色留在矿区；先回基地等待可用炮台。
+            station = turn.station()
+            if station is None:
+                continue
+            target = station.pos
+        if distance(controller.pos, target) <= 1 and weapon is not None:
             targets = _targets_for(weapon, threats)
             if targets and weapon.cooldown == 0:
                 commands[weapon.unit_id] = attack(controller.unit_id, targets)
         else:
-            step = next_step_near(turn, controller, weapon.pos)
+            step = next_step_near(turn, controller, target)
             if step is not None:
                 commands[controller.unit_id] = move(step)
     return commands

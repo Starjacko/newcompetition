@@ -9,6 +9,21 @@ def _positions(positions: Pos | list[Pos] | tuple[Pos, ...]) -> list[dict[str, i
     return [position.dump() for position in positions]
 
 
+def _valid_positions(raw: Any) -> bool:
+    return (
+        isinstance(raw, list)
+        and bool(raw)
+        and all(
+            isinstance(position, dict)
+            and isinstance(position.get("x"), int)
+            and not isinstance(position.get("x"), bool)
+            and isinstance(position.get("y"), int)
+            and not isinstance(position.get("y"), bool)
+            for position in raw
+        )
+    )
+
+
 def move(pos: Pos) -> dict[str, Any]:
     return {"action": "move", "targetPos": _positions(pos)}
 
@@ -79,15 +94,38 @@ def validate_commands(commands: dict[int, dict[str, Any]]) -> dict[int, dict[str
         if action not in valid_actions:
             continue
         if action in {"move", "attack", "build", "remove", "collect", "use", "summonTreasure"}:
-            if not command.get("targetPos") and action not in {"use"}:
+            if action != "use" and not _valid_positions(command.get("targetPos")):
+                continue
+            if action == "use" and "targetPos" in command and not _valid_positions(command["targetPos"]):
                 continue
         if action == "attack":
             controller_id = command.get("controllerId")
-            if not controller_id or controller_id in controllers:
+            try:
+                normalized_controller_id = int(controller_id)
+            except (TypeError, ValueError):
                 continue
-            controllers.add(controller_id)
+            if normalized_controller_id in controllers:
+                continue
+            controllers.add(normalized_controller_id)
+            command = dict(command)
+            command["controllerId"] = str(normalized_controller_id)
         if action in {"sell", "buy", "use", "drop", "build"} and not command.get("name"):
             continue
+        if action == "submitAnswer" and not str(command.get("taskAnswer") or "").strip():
+            continue
+        if action == "summonTreasure":
+            items = command.get("item")
+            if (
+                not isinstance(items, list)
+                or not items
+                or not all(isinstance(item, str) and item for item in items)
+            ):
+                continue
+        if action in {"sell", "buy"} and "num" in command:
+            if not isinstance(command["num"], int) or isinstance(command["num"], bool):
+                continue
+            if command["num"] <= 0:
+                continue
         result[normalized_role_id] = command
     return result
 
@@ -107,11 +145,26 @@ def validate_for_turn_detailed(
 ) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
     """Return accepted actions plus machine-readable rejection reasons."""
     # 先做字段级校验，再做角色权限和昼夜规则校验。
+    rejected: list[dict[str, Any]] = []
+    for role_id, command in commands.items():
+        if (
+            isinstance(command, dict)
+            and command.get("action") == "attack"
+            and not _is_int_like(command.get("controllerId"))
+        ):
+            try:
+                normalized_role_id = int(role_id)
+            except (TypeError, ValueError):
+                continue
+            rejected.append({
+                "roleId": normalized_role_id,
+                "action": "attack",
+                "reason": "invalid_controller_id",
+            })
     commands = validate_commands(commands)
     by_id = {unit.unit_id: unit for unit in turn.ours}
     controllers: set[int] = set()
     result: dict[int, dict[str, Any]] = {}
-    rejected: list[dict[str, Any]] = []
     for role_id, command in commands.items():
         actor = by_id.get(role_id)
         if actor is None or actor.health <= 0:
@@ -156,6 +209,11 @@ def validate_for_turn_detailed(
             }
             if not allowed and not reason:
                 reason = "unsupported_build_name"
+        if action in {"build", "remove", "collect"} and allowed:
+            target = Pos.load(command["targetPos"][0])
+            if max(abs(actor.pos.x - target.x), abs(actor.pos.y - target.y)) > 1:
+                allowed = False
+                reason = "target_out_of_interaction_range"
         if action == "remove":
             allowed = allowed and bool(turn.walls())
             if not allowed and not reason:
@@ -169,3 +227,11 @@ def validate_for_turn_detailed(
                 "reason": reason or "permission_denied",
             })
     return result, rejected
+
+
+def _is_int_like(value: Any) -> bool:
+    try:
+        int(value)
+    except (TypeError, ValueError):
+        return False
+    return value is not None and not isinstance(value, bool)

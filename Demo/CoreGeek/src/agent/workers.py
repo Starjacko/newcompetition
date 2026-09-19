@@ -90,15 +90,6 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
     has_ore = _has_ore(worker)
     ready_to_sell = _ready_to_sell(turn, worker, memory)
 
-    # 升级券只有在不打断当前采矿批次时才使用。
-    if not has_ore or ready_to_sell:
-        upgrade = plan_upgrade(turn, worker, config)
-    else:
-        upgrade = None
-    if upgrade is not None:
-        memory.worker2_phase = "upgrade"
-        return upgrade
-
     if has_ore and ready_to_sell:
         # 一个矿采完、矿点消失或背包满后，才进入卖矿流程。
         sold = sell_backpack(turn, worker)
@@ -109,6 +100,15 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
         if vendor is not None:
             memory.worker2_phase = "sell"
             return move_to(turn, worker, vendor)
+        # 没有找到小贩时不能跳过卖矿直接买券或继续采矿。
+        return None
+
+    # 只有当前矿批次已经卖空后，才按队列购买并使用升级券。
+    if not has_ore:
+        upgrade = plan_upgrade(turn, worker, config)
+        if upgrade is not None:
+            memory.worker2_phase = "upgrade"
+            return upgrade
 
     if memory.worker2_phase == "sell":
         shop = nearest_zone(turn, worker, "weaponShop")
@@ -119,11 +119,6 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
             memory.worker2_phase = "buy_upgrade"
             return bought
         memory.worker2_phase = "mine"
-
-    bought = buy_upgrade(turn, worker, config)
-    if bought is not None:
-        memory.worker2_phase = "buy_upgrade"
-        return bought
 
     mine = memory.worker2_mine
     if mine not in turn.mines():

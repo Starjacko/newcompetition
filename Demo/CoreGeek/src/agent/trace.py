@@ -40,7 +40,10 @@ def command_snapshot(commands: dict[int, dict[str, Any]]) -> list[dict[str, Any]
 
 
 def turn_snapshot(turn: Turn) -> dict[str, Any]:
-    hostile = turn.our_robots()
+    hostile = [
+        robot for robot in turn.robots
+        if robot.target_team == turn.team_type or robot.target_team is None
+    ]
     unknown = [robot.robot_id for robot in turn.robots if robot.target_team is None]
     return {
         "roundNo": turn.round_no,

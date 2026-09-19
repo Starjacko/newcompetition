@@ -227,6 +227,65 @@ def test_worker2_does_not_sell_before_mine_is_finished() -> None:
     assert command["action"] in {"move", "collect"}
 
 
+def test_worker2_sells_before_using_upgrade_voucher() -> None:
+    from agent.config import StrategyConfig
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+    from agent.workers import _worker2
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    payload["teamOur"]["goldNum"] = 100
+    worker = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["id"] == 10012
+    )
+    worker["backpack"] = ["iron", "WeaponUpgradeVoucher1"]
+    turn = Turn.load(payload)
+    memory = PersistentMemory(
+        worker2_mine=next(iter(turn.mines("iron"))),
+        worker2_mine_collects=10,
+    )
+    command = _worker2(turn, turn.workers()[1], memory, StrategyConfig())
+    assert command is not None
+    assert command["action"] in {"move", "sell"}
+
+
+def test_night_defence_returns_unassigned_worker_to_station() -> None:
+    from agent.brain import decide
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    payload["robot"]["roles"] = [{
+        "id": 90001,
+        "pos": {"x": 39, "y": 30},
+        "roleType": "smallRobot",
+        "health": 100,
+        "targetTeam": "challenger",
+    }]
+    payload["teamOur"]["roles"] = [
+        role for role in payload["teamOur"]["roles"]
+        if role["roleType"] in {"station", "worker", "pioneer", "rocket"}
+    ]
+    response = decide(payload)
+    commands = response["roleCommandMap"]
+    assert commands["10010"]["action"] == "move"
+    assert commands["10011"]["action"] == "move"
+    assert commands["10012"]["action"] == "move"
+
+
+def test_malformed_command_fields_are_rejected() -> None:
+    from agent.commands import validate_commands
+
+    accepted = validate_commands({
+        10010: {"action": "move", "targetPos": [{"x": "1", "y": 1}]},
+        10011: {"action": "summonTreasure", "targetPos": [{"x": 1, "y": 1}]},
+        10012: {"action": "submitAnswer", "taskAnswer": ""},
+    })
+    assert accepted == {}
+
+
 def test_only_worker2_collects_count_toward_worker2_mine() -> None:
     from agent.memory import PersistentMemory
     from agent.protocol import Turn
