@@ -34,6 +34,7 @@ class PersistentMemory:
     last_plans: dict[int, dict] = field(default_factory=dict)
     action_failures: dict[int, int] = field(default_factory=dict)
     last_failure_reason: dict[int, str] = field(default_factory=dict)
+    failure_round: dict[int, int] = field(default_factory=dict)
     sop_library: dict[str, dict[str, Any]] = field(default_factory=dict)
     sop_path: str | None = None
 
@@ -58,8 +59,10 @@ class PersistentMemory:
                         self.worker2_mine_collects += 1
                 self.action_failures.pop(role_id, None)
                 self.last_failure_reason.pop(role_id, None)
+                self.failure_round.pop(role_id, None)
                 continue
             self.action_failures[role_id] = self.action_failures.get(role_id, 0) + 1
+            self.failure_round[role_id] = turn.round_no
             self.last_failure_reason[role_id] = _error_for_role(turn, role_id)
         task_is_active = bool(turn.phase_task)
         if self.task_was_active and not task_is_active:
@@ -91,12 +94,22 @@ class PersistentMemory:
         self.pioneer_agent_phase = "explore"
         self.action_failures.clear()
         self.last_failure_reason.clear()
+        self.failure_round.clear()
         self.last_plans.clear()
 
     def record(self, commands: dict[int, dict]) -> None:
         self.last_plans = dict(commands)
 
-    def failed_repeatedly(self, role_id: int, threshold: int = 2) -> bool:
+    def failed_repeatedly(
+        self,
+        role_id: int,
+        current_round: int | None = None,
+        threshold: int = 2,
+    ) -> bool:
+        if current_round is not None:
+            last_failure = self.failure_round.get(role_id)
+            if last_failure is None or current_round - last_failure >= threshold:
+                return False
         return self.action_failures.get(role_id, 0) >= threshold
 
     def remember_sop(

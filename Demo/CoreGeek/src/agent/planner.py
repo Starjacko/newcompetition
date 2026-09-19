@@ -80,7 +80,7 @@ class Planner:
 
     def _has_repeated_failure(self, turn: Turn) -> bool:
         return any(
-            self.memory.failed_repeatedly(role.unit_id)
+            self.memory.failed_repeatedly(role.unit_id, turn.round_no)
             for role in turn.controllable()
         )
 
@@ -96,7 +96,7 @@ class Planner:
             preferred[worker1.unit_id] = "rocket"
             preferred[worker2.unit_id] = "gatling"
         for role in turn.controllable():
-            if not self.memory.failed_repeatedly(role.unit_id):
+            if not self.memory.failed_repeatedly(role.unit_id, turn.round_no):
                 continue
             target = weapons.get(preferred.get(role.unit_id, preferred.get(role.kind, "")))
             if target is None:

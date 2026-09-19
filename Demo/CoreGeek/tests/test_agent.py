@@ -160,3 +160,22 @@ def test_invalid_controller_id_is_rejected_without_exception() -> None:
     )
     assert accepted == {}
     assert rejected
+
+
+def test_failure_recovery_expires_without_new_failures() -> None:
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["lastRoundRoleActionResults"] = {"10010": False}
+    memory = PersistentMemory(last_round=0)
+    memory.update_context(Turn.load(payload))
+    payload["roundNo"] = 2
+    payload["lastRoundRoleActionResults"] = {"10010": False}
+    memory.update_context(Turn.load(payload))
+    assert memory.failed_repeatedly(10010, 2)
+    payload["roundNo"] = 4
+    payload["lastRoundRoleActionResults"] = {}
+    memory.update_context(Turn.load(payload))
+    assert not memory.failed_repeatedly(10010, 4)
