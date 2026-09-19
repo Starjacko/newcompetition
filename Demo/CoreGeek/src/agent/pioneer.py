@@ -43,7 +43,7 @@ def plan(
 
 
 def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> PioneerDecision:
-    # During a self-evolution task, leaving the task point ends the task.
+    # 自进化任务期间离开任务点一格会直接结束任务，所以不能正常回防或寻矿。
     if memory.task_position is not None and distance(pioneer.pos, memory.task_position) > 1:
         step = next_step_near(turn, pioneer, memory.task_position)
         return PioneerDecision(command=move(step) if step else None)
@@ -64,6 +64,7 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
             f"{turn.phase_task}\n沙盒输出：\n{turn.last_cmd_result}",
         )
     if turn.last_cmd_result:
+        # 沙盒有输出时，下一步先让 LLM 把探索结果整理成最终答案。
         memory.pioneer_agent_phase = "answering"
         memory.remember_sop(
             memory.task_type or "unknown",

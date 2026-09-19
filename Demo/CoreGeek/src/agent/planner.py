@@ -24,6 +24,7 @@ class Planner:
         self.memory.base_corner = base_corner(turn)
         self.memory.attack_face = attack_face(turn)
 
+        # 防守优先级高于一切运营动作；白天临近夜晚时也必须先回防。
         if not turn.is_day and hostile_robots(turn):
             mode = "night_defence"
             commands = plan_combat(turn)
@@ -79,6 +80,7 @@ class Planner:
         }
 
     def _has_repeated_failure(self, turn: Turn) -> bool:
+        # 只处理最近连续失败，避免一次历史失败永久打断正常流水线。
         return any(
             self.memory.failed_repeatedly(role.unit_id, turn.round_no)
             for role in turn.controllable()
@@ -112,6 +114,7 @@ class Planner:
         return commands
 
     def _must_return(self, turn: Turn) -> bool:
+        # 用“到固定武器的距离 + 安全余量”估计是否来得及在夜晚前回防。
         controllers = turn.controllable()
         if not controllers:
             return False
@@ -136,6 +139,7 @@ class Planner:
         )
 
     def _return_to_defence(self, turn: Turn) -> dict[int, dict]:
+        # 回防阶段每个角色只发移动命令，暂停采矿、建造、任务和购买。
         commands: dict[int, dict] = {}
         controllers = turn.controllable()
         weapons = {weapon.kind: weapon for weapon in turn.weapons()}

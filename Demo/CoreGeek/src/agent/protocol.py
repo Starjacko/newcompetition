@@ -35,6 +35,7 @@ class Pos:
 
 
 def distance(first: Pos, second: Pos) -> int:
+    # 游戏规则使用切比雪夫距离，角色可以向八个方向移动。
     return max(abs(first.x - second.x), abs(first.y - second.y))
 
 
@@ -187,6 +188,7 @@ class Turn:
 
     @classmethod
     def load(cls, payload: dict[str, Any]) -> "Turn":
+        # 所有外部 JSON 字段在这里归一化，业务模块不直接依赖原始字典。
         round_no = int(payload["roundNo"])
         info = payload["mapInfo"]
         team = payload["teamOur"]
@@ -315,6 +317,7 @@ class Turn:
         return frozenset(cells)
 
     def blocked(self, moving: Unit) -> frozenset[Pos]:
+        # 矿区、商店、任务点、建筑、角色和机器人都会阻挡移动。
         cells = {pos for pos, kind in self.zones.items() if kind != LAND}
         cells.update(self.occupied_cells())
         cells.discard(moving.pos)

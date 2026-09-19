@@ -2,6 +2,7 @@ from .protocol import Pos, Turn, distance, station_footprint
 
 
 def base_corner(turn: Turn) -> str | None:
+    # 基地坐标是基地 2x2 footprint 的左上角。
     station = turn.station()
     if station is None:
         return None
@@ -30,6 +31,7 @@ def tower_sites(turn: Turn) -> tuple[Pos, ...]:
 
 
 def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Pos, ...]]:
+    # 只把主攻面做完整，上下侧墙按比例建设，避免平均铺满浪费 stone。
     station = turn.station()
     if station is None:
         return (), (), ()

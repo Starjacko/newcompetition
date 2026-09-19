@@ -1,6 +1,5 @@
 from .commands import attack, move
 from .grid import next_step_near
-from .layout import tower_sites
 from .protocol import Robot, Turn, Unit, distance
 
 
@@ -13,7 +12,7 @@ ROLE_WEAPON_PREFERENCE = {
 
 def hostile_robots(turn: Turn) -> tuple[Robot, ...]:
     """Only robots whose targetTeam is ours trigger full-team defence."""
-    # Older payloads may omit targetTeam. Be conservative only in that case.
+    # 老版本请求可能没有 targetTeam，缺失时保守视为潜在威胁。
     return tuple(
         robot for robot in turn.robots
         if robot.target_team == turn.team_type or robot.target_team is None
@@ -24,6 +23,7 @@ def plan(turn: Turn) -> dict[int, dict]:
     threats = hostile_robots(turn)
     if not threats:
         return {}
+    # 角色和武器按固定职责绑定；fallback 只在目标武器暂时不存在时使用。
     weapons = {weapon.kind: weapon for weapon in turn.weapons()}
     controllers = _controllers_by_preference(turn)
     commands: dict[int, dict] = {}
@@ -103,6 +103,7 @@ def _targets_for(weapon: Unit, threats: tuple[Robot, ...]) -> list:
             robot.robot_id,
         ),
     )
+    # 炮台等级决定最多可提交的目标数；低等级武器仍只提交一个目标。
     count = min(max(weapon.level, 1), len(ranked))
     if weapon.kind not in {"gatling", "rocket"} or count == 1:
         return [robot.pos for robot in ranked[:count]]
@@ -117,6 +118,7 @@ def _targets_for(weapon: Unit, threats: tuple[Robot, ...]) -> list:
 
 
 def _same_cone(weapon: Unit, first: Robot, second: Robot) -> bool:
+    # 点积非负表示夹角不超过 90 度，满足加特林的同锥形约束。
     first_dx = first.pos.x - weapon.pos.x
     first_dy = first.pos.y - weapon.pos.y
     second_dx = second.pos.x - weapon.pos.x

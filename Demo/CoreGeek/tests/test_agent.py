@@ -179,3 +179,79 @@ def test_failure_recovery_expires_without_new_failures() -> None:
     payload["lastRoundRoleActionResults"] = {}
     memory.update_context(Turn.load(payload))
     assert not memory.failed_repeatedly(10010, 4)
+
+
+def test_worker1_batch_state_stays_in_build_phase() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+    from agent.workers import _worker1
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    payload["teamOur"]["goldNum"] = 0
+    worker = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["id"] == 10010
+    )
+    worker["backpack"] = ["stone"] * 6
+    turn = Turn.load(payload)
+    memory = PersistentMemory()
+    command = _worker1(turn, turn.workers()[0], memory, DEFAULT_CONFIG)
+    assert command is not None
+    assert memory.worker1_building_batch is True
+
+
+def test_worker2_does_not_sell_before_mine_is_finished() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+    from agent.workers import _worker2
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    worker = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["id"] == 10012
+    )
+    worker["backpack"] = ["iron"]
+    turn = Turn.load(payload)
+    memory = PersistentMemory(
+        worker2_mine=next(iter(turn.mines("iron"))),
+        worker2_mine_collects=1,
+    )
+    command = _worker2(turn, turn.workers()[1], memory, DEFAULT_CONFIG)
+    assert command is not None
+    assert command["action"] in {"move", "collect"}
+
+
+def test_only_worker2_collects_count_toward_worker2_mine() -> None:
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["lastRoundRoleActionResults"] = {}
+    turn = Turn.load(payload)
+    mine = next(iter(turn.mines("stone")))
+    memory = PersistentMemory(
+        worker2_mine=mine,
+        last_plans={
+            10010: {"action": "collect", "targetPos": [mine.dump()]},
+            10012: {"action": "collect", "targetPos": [mine.dump()]},
+        },
+    )
+    payload["roundNo"] = 2
+    payload["lastRoundRoleActionResults"] = {"10010": True, "10012": True}
+    memory.update_context(Turn.load(payload))
+    assert memory.worker2_mine_collects == 1
+
+
+def test_empty_sop_observation_does_not_increase_attempts() -> None:
+    from agent.memory import PersistentMemory
+
+    memory = PersistentMemory()
+    memory.remember_sop("自进化类1")
+    assert memory.sop_library == {}

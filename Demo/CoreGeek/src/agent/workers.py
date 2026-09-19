@@ -13,6 +13,7 @@ def plan(turn: Turn, memory: PersistentMemory, config: StrategyConfig) -> dict[i
         return commands
     worker1_id = min(worker.unit_id for worker in workers)
     for worker in workers:
+        # 工人职责按稳定 ID 绑定，不根据距离临时换岗，保证流水线状态连续。
         command = (
             _worker1(turn, worker, memory, config)
             if worker.unit_id == worker1_id
@@ -31,6 +32,7 @@ def _worker1(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
             continue
         memory.worker1_phase = "build_weapons"
         if turn.gold < WEAPON_BUILD_COST:
+            # 武器未建完时，金币不足不能提前建墙，必须先恢复赚钱流程。
             memory.worker1_phase = "earn_for_weapons"
             return _earn(turn, worker, config)
         if distance(worker.pos, site) <= 1:
@@ -56,6 +58,7 @@ def _worker1(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
             memory.worker1_batch_goal = None
             memory.worker1_building_batch = False
         if memory.worker1_building_batch:
+            # 一旦凑够一批石头，连续建造直到本批石头耗尽。
             if stones <= 0:
                 memory.worker1_building_batch = False
             else:
@@ -87,6 +90,7 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
     has_ore = _has_ore(worker)
     ready_to_sell = _ready_to_sell(turn, worker, memory)
 
+    # 升级券只有在不打断当前采矿批次时才使用。
     if not has_ore or ready_to_sell:
         upgrade = plan_upgrade(turn, worker, config)
     else:
@@ -96,6 +100,7 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
         return upgrade
 
     if has_ore and ready_to_sell:
+        # 一个矿采完、矿点消失或背包满后，才进入卖矿流程。
         sold = sell_backpack(turn, worker)
         if sold is not None:
             memory.worker2_phase = "sell"
@@ -129,6 +134,7 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
         return None
     memory.worker2_phase = "mine"
     if distance(worker.pos, mine) <= 1:
+        # collect 每次只采 1 个资源，成功次数由下一回合结果写回 memory。
         return collect(mine)
     return move_to(turn, worker, mine)
 

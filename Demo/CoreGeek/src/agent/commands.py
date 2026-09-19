@@ -1,14 +1,6 @@
 from typing import Any
 
-from .protocol import (
-    CONTROLLABLE_TYPES,
-    PIONEER,
-    TOWER_TYPES,
-    WALL,
-    WORKER,
-    Turn,
-    Pos,
-)
+from .protocol import CONTROLLABLE_TYPES, TOWER_TYPES, WORKER, Turn, Pos
 
 
 def _positions(positions: Pos | list[Pos] | tuple[Pos, ...]) -> list[dict[str, int]]:
@@ -79,6 +71,10 @@ def validate_commands(commands: dict[int, dict[str, Any]]) -> dict[int, dict[str
     for role_id, command in commands.items():
         if not isinstance(command, dict):
             continue
+        try:
+            normalized_role_id = int(role_id)
+        except (TypeError, ValueError):
+            continue
         action = command.get("action")
         if action not in valid_actions:
             continue
@@ -92,7 +88,7 @@ def validate_commands(commands: dict[int, dict[str, Any]]) -> dict[int, dict[str
             controllers.add(controller_id)
         if action in {"sell", "buy", "use", "drop", "build"} and not command.get("name"):
             continue
-        result[int(role_id)] = command
+        result[normalized_role_id] = command
     return result
 
 
@@ -110,6 +106,7 @@ def validate_for_turn_detailed(
     commands: dict[int, dict[str, Any]],
 ) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
     """Return accepted actions plus machine-readable rejection reasons."""
+    # 先做字段级校验，再做角色权限和昼夜规则校验。
     commands = validate_commands(commands)
     by_id = {unit.unit_id: unit for unit in turn.ours}
     controllers: set[int] = set()
@@ -124,6 +121,7 @@ def validate_for_turn_detailed(
         allowed = True
         reason = ""
         if action == "attack":
+            # 响应 key 是炮台 ID，controllerId 必须是存活的可控角色 ID。
             try:
                 controller_id = int(command["controllerId"])
             except (TypeError, ValueError):

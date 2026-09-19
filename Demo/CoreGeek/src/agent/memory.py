@@ -39,6 +39,7 @@ class PersistentMemory:
     sop_path: str | None = None
 
     def update_context(self, turn: Turn) -> None:
+        # Request 只描述当前回合，上一回合动作结果要在这里合并到跨回合状态。
         if (
             self.last_round
             and turn.round_no < self.last_round
@@ -50,10 +51,13 @@ class PersistentMemory:
             self.reset_runtime()
         self.team_type = turn.team_type or self.team_type
         self.team_id = turn.team_id or self.team_id
+        worker_ids = [worker.unit_id for worker in turn.workers()]
+        worker2_id = max(worker_ids, default=None)
         for role_id, success in turn.last_action_results.items():
             if success:
                 previous = self.last_plans.get(role_id) or {}
-                if previous.get("action") == "collect":
+                if role_id == worker2_id and previous.get("action") == "collect":
+                    # collect 的成功结果在下一回合才返回，因此在这里累计采矿次数。
                     target = _plan_target(previous)
                     if target is not None and target == self.worker2_mine:
                         self.worker2_mine_collects += 1
@@ -77,7 +81,7 @@ class PersistentMemory:
         self.last_day = (turn.round_no - 1) // 130 + 1
 
     def reset_runtime(self) -> None:
-        """Reset one match's live state while retaining reusable SOP knowledge."""
+        """清理本局运行态，但保留可跨局复用的 SOP 知识。"""
         self.worker1_phase = "build_weapons"
         self.worker1_wall_stage = None
         self.worker1_batch_goal = None
@@ -121,6 +125,8 @@ class PersistentMemory:
         output: str = "",
     ) -> None:
         if not task_type:
+            return
+        if not (prompt or execute_cmd or output):
             return
         record = self.sop_library.setdefault(
             task_type,

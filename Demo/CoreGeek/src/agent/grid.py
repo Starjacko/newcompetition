@@ -51,7 +51,7 @@ def next_step(turn: Turn, moving: Unit, goal: Pos) -> Pos | None:
 
 
 def next_step_near(turn: Turn, moving: Unit, target: Pos) -> Pos | None:
-    """Find one step toward any legal interaction cell around a target."""
+    """走向目标周围的合法交互格，而不是把阻挡物本身当作终点。"""
     if distance(moving.pos, target) <= 1:
         return None
     goals = [

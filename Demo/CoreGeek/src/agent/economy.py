@@ -46,6 +46,7 @@ def plan_upgrade(turn: Turn, role: Unit, config: StrategyConfig) -> dict | None:
     item, target_kind = selected
     target = upgrade_target(turn, target_kind)
     if target is None:
+        # 目标建筑不存在时不发送 use，避免消耗升级券或产生非法动作。
         return None
     if target is not None and distance(role.pos, target) > 1:
         return move_to(turn, role, target)
