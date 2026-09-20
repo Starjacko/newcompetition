@@ -173,7 +173,11 @@ def test_upper_left_wall_targets_have_requested_counts() -> None:
     assert len(front) == 6
     assert len(upper) == 4
     assert len(lower) == 4
-    assert all(pos.x > station.pos.x for pos in front)
+    assert {pos.x for pos in front} == {station.pos.x + 2}
+    assert [pos.x for pos in upper] == list(range(station.pos.x - 1, station.pos.x + 3))
+    assert [pos.x for pos in lower] == list(range(station.pos.x - 1, station.pos.x + 3))
+    assert {pos.y for pos in upper} == {station.pos.y + 1}
+    assert {pos.y for pos in lower} == {station.pos.y - 2}
 
 
 def test_lower_right_wall_targets_mirror_main_side_and_scan_left_to_right() -> None:
@@ -192,9 +196,11 @@ def test_lower_right_wall_targets_mirror_main_side_and_scan_left_to_right() -> N
     assert len(front) == 6
     assert len(upper) == 4
     assert len(lower) == 4
-    assert all(pos.x < station["pos"]["x"] for pos in front)
+    assert {pos.x for pos in front} == {station["pos"]["x"] - 1}
     assert [pos.x for pos in upper] == sorted(pos.x for pos in upper)
     assert [pos.x for pos in lower] == sorted(pos.x for pos in lower)
+    assert {pos.y for pos in upper} == {station["pos"]["y"] + 1}
+    assert {pos.y for pos in lower} == {station["pos"]["y"] - 2}
 
 
 def test_weapon_upgrade_queue_skips_already_upgraded_target() -> None:
@@ -386,6 +392,7 @@ def test_active_task_keeps_pioneer_from_night_defence() -> None:
     from agent.config import DEFAULT_CONFIG
     from agent.memory import PersistentMemory
     from agent.planner import Planner
+    from agent.protocol import Pos
 
     payload = load_payload()
     payload["roundNo"] = 71
@@ -455,6 +462,73 @@ def test_active_task_uses_successful_cmd_output_for_answer_prompt() -> None:
     pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
     decision = plan(turn, pioneer, PersistentMemory(), None)
     assert "result=42" in decision.prompt
+
+
+def test_file_task_starts_with_reading_task_file() -> None:
+    from agent.memory import PersistentMemory
+    from agent.pioneer import plan
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["phaseTask"] = "请阅读task1.md，获取任务信息"
+    payload["lastCmdResult"] = ""
+    payload["llmResp"] = ""
+    turn = Turn.load(payload)
+    pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
+    memory = PersistentMemory(
+        task_position=pioneer.pos,
+        pioneer_agent_phase="explore",
+    )
+    decision = plan(turn, pioneer, memory, None)
+    assert decision.execute_cmd == "cat task1.md"
+
+
+def test_file_task_keeps_exploring_after_file_output() -> None:
+    from agent.memory import PersistentMemory
+    from agent.pioneer import plan
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["phaseTask"] = "请阅读task1.md，获取任务信息"
+    payload["lastCmdResult"] = "[exitCode:0]\n请继续查询字段"
+    payload["llmResp"] = ""
+    turn = Turn.load(payload)
+    pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
+    memory = PersistentMemory(
+        task_position=pioneer.pos,
+        pioneer_agent_phase="executing",
+    )
+    decision = plan(turn, pioneer, memory, None)
+    assert decision.prompt
+    assert "CMD:" in decision.prompt
+    assert "ANSWER:" in decision.prompt
+
+
+def test_planner_file_task_emits_probe_after_acceptance() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.planner import Planner
+    from agent.protocol import Pos
+
+    payload = load_payload()
+    payload["phaseTask"] = "请阅读task1.md，获取任务信息"
+    payload["lastCmdResult"] = ""
+    payload["llmResp"] = ""
+    pioneer = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["roleType"] == "pioneer"
+    )
+    # 模拟已经成功接取任务；任务点位置由上一回合保存在 memory 中。
+    memory = PersistentMemory(
+        task_position=Pos(14, 14),
+        pioneer_agent_phase="executing",
+    )
+    planner = Planner(memory, DEFAULT_CONFIG)
+    pioneer["pos"] = {"x": 14, "y": 14}
+    response = planner.decide(payload)
+    assert response["executeCmd"] == "cat task1.md"
+    assert response["prompt"] == ""
+    assert str(pioneer["id"]) not in response["roleCommandMap"]
 
 
 def test_active_task_accepts_unprefixed_final_answer() -> None:

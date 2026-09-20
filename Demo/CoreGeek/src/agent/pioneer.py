@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 
 from .commands import accept_task, move, submit_answer
 from .config import StrategyConfig
@@ -49,34 +50,35 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
         return PioneerDecision(command=move(step) if step else None)
     cmd_output = _usable_cmd_output(turn.last_cmd_result)
     memory.remember_sop(memory.task_type or "unknown", output=cmd_output)
-    if memory.pioneer_agent_phase == "answering":
-        if turn.llm_resp:
-            # ANSWER: 是首选格式；但接口没有强制 LLM 必须带前缀。
-            # 已经有成功沙盒结果时，非空响应也应作为最终答案提交，避免任务卡在 answering。
-            answer = _extract_answer(turn.llm_resp) or turn.llm_resp.strip()
-            if answer:
-                memory.pioneer_agent_phase = "submitted"
-                memory.remember_sop(
-                    memory.task_type or "unknown",
-                    prompt=answer,
-                )
-                return PioneerDecision(command=submit_answer(answer))
-        return PioneerDecision(
-            prompt="请只输出当前自进化任务的最终答案，必须使用 ANSWER: <答案> 格式，"
-            "不要输出解释或代码：\n"
-            f"{turn.phase_task}\n沙盒输出：\n{cmd_output}",
-        )
-    if cmd_output:
-        # 沙盒有输出时，下一步先让 LLM 把探索结果整理成最终答案。
-        memory.pioneer_agent_phase = "answering"
+    file_probe = _task_file_probe(turn.phase_task)
+    # phaseTask 可能与上回合普通 LLM 响应同时出现。文件型任务必须先读
+    # 题目文件，不能让残留响应抢走这一步。
+    if (
+        file_probe is not None
+        and not cmd_output
+        and turn.llm_resp
+        and not _extract_answer(turn.llm_resp)
+        and not _looks_like_command_response(turn.llm_resp)
+    ):
+        memory.pioneer_agent_phase = "executing"
         memory.remember_sop(
             memory.task_type or "unknown",
-            output=cmd_output,
+            execute_cmd=file_probe,
         )
-        return PioneerDecision(
-            prompt="请根据当前自进化任务描述和沙盒输出生成最终答案，只输出 ANSWER: 后的答案：\n"
-            f"{turn.phase_task}\n沙盒输出：\n{cmd_output}",
+        return PioneerDecision(execute_cmd=file_probe)
+    if (
+        file_probe is not None
+        and not turn.llm_resp
+        and not cmd_output
+        and memory.pioneer_agent_phase != "submitted"
+    ):
+        # 文件型任务先读取题目，再把真实内容交给 LLM。
+        memory.pioneer_agent_phase = "executing"
+        memory.remember_sop(
+            memory.task_type or "unknown",
+            execute_cmd=file_probe,
         )
+        return PioneerDecision(execute_cmd=file_probe)
     if turn.llm_resp:
         answer = _extract_answer(turn.llm_resp)
         if answer:
@@ -84,17 +86,36 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
             memory.remember_sop(memory.task_type or "unknown", prompt=answer)
             return PioneerDecision(command=submit_answer(answer))
         command = _extract_command(turn.llm_resp)
+        if command and _looks_like_command_response(turn.llm_resp):
+            memory.pioneer_agent_phase = "executing"
+            memory.remember_sop(
+                memory.task_type or "unknown",
+                execute_cmd=command,
+            )
+            return PioneerDecision(execute_cmd=command)
+        if _looks_like_task_echo(turn.llm_resp):
+            return PioneerDecision(
+                prompt=_exploration_prompt(turn, cmd_output),
+            )
+        if memory.pioneer_agent_phase in {"answering", "exploring"} and cmd_output:
+            # ANSWER: 是首选格式；接口没有强制 LLM 必须带前缀。
+            # 已经有成功沙盒结果时，非空响应也允许作为最终答案提交，避免卡死。
+            answer = turn.llm_resp.strip()
+            if answer:
+                memory.pioneer_agent_phase = "submitted"
+                memory.remember_sop(
+                    memory.task_type or "unknown",
+                    prompt=answer,
+                )
+                return PioneerDecision(command=submit_answer(answer))
         if not command:
             return PioneerDecision(
-                prompt="请为当前自进化任务输出一条可执行探索命令，格式为 CMD: <命令>。\n"
-                f"{turn.phase_task}",
+                prompt=_exploration_prompt(turn, cmd_output),
             )
-        memory.pioneer_agent_phase = "executing"
-        memory.remember_sop(
-            memory.task_type or "unknown",
-            execute_cmd=command,
-        )
-        return PioneerDecision(execute_cmd=command)
+    if cmd_output:
+        # 一次命令的成功输出不等于任务答案；文件型任务经常需要多轮探索。
+        memory.pioneer_agent_phase = "exploring"
+        return PioneerDecision(prompt=_exploration_prompt(turn, cmd_output))
     sop = memory.sop_library.get(memory.task_type or "")
     return PioneerDecision(
         prompt=(
@@ -104,6 +125,39 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
             f"{turn.phase_task}\n历史 SOP：\n{sop or '暂无'}"
         ),
     )
+
+
+def _exploration_prompt(turn: Turn, output: str) -> str:
+    return (
+        "请根据当前自进化任务和最新沙盒输出继续完成任务："
+        "如果信息不足，只输出 CMD: <一条下一步可执行命令>；"
+        "如果已经得到最终答案，只输出 ANSWER: <答案>。不要输出解释。\n"
+        f"任务：\n{turn.phase_task}\n沙盒输出：\n{output}"
+    )
+
+
+def _task_file_probe(task: str) -> str | None:
+    """识别任务中要求读取的本地 md/txt 文件，先自动完成第一步探索。"""
+    # 任务文件名经常紧跟中文标点；`\b` 在中英文边界上并不可靠，
+    # 因此只匹配文件名本身，并用白名单限制为沙盒内常见文本文件。
+    match = re.search(r"([A-Za-z0-9_.-]+\.(?:md|txt|json|csv))", task)
+    if match is None:
+        return None
+    filename = match.group(1)
+    return f"cat {filename}"
+
+
+def _looks_like_command_response(response: str) -> bool:
+    text = response.strip()
+    return any(
+        line.strip().upper().startswith("CMD:")
+        for line in text.splitlines()
+    ) or "```" in text
+
+
+def _looks_like_task_echo(response: str) -> bool:
+    text = response.lower()
+    return "phase_task" in text or "phasetask" in text
 
 
 def _extract_command(response: str) -> str:

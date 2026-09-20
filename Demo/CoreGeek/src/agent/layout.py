@@ -64,26 +64,31 @@ def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Po
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
     face = attack_face(turn)
-    # 基地两格宽、两格高：主攻面向外延伸为 6 格，上下各 4 格。
+    # 基地两格宽、两格高。主攻面墙贴着基地外沿布置，避免在基地和墙
+    # 之间留下一个会被机器人利用的空档；上下侧墙则交给 workers.py
+    # 按从左到右的顺序取一半。
     # 左上基地的主攻面是右侧，右下基地则镜像到左侧。
     if face == "right":
         front = [
-            Pos(xmax + 2, y)
+            Pos(xmax + 1, y)
             for y in range(ymin - 2, ymax + 3)
         ]
+        horizontal_xs = range(xmin - 1, xmax + 2)
     else:
         front = [
-            Pos(xmin - 2, y)
+            Pos(xmin - 1, y)
             for y in range(ymin - 2, ymax + 3)
         ]
-    upper = [
-        Pos(x, ymax + 2)
-        for x in range(xmin - 1, xmax + 2)
-    ]
-    lower = [
-        Pos(x, ymin - 2)
-        for x in range(xmin - 1, xmax + 2)
-    ]
+        horizontal_xs = range(xmin - 1, xmax + 2)
+    # 上、下两条侧墙都严格按 x 从小到大生成，随后由 _fraction 取左侧一半。
+    upper = sorted([
+        Pos(x, ymax + 1)
+        for x in horizontal_xs
+    ], key=lambda pos: (pos.x, pos.y))
+    lower = sorted([
+        Pos(x, ymin - 1)
+        for x in horizontal_xs
+    ], key=lambda pos: (pos.x, pos.y))
     return (
         tuple(pos for pos in front if turn.land(pos)),
         tuple(pos for pos in upper if turn.land(pos)),
