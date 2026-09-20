@@ -141,6 +141,25 @@ def test_low_gold_worker1_keeps_weapon_priority() -> None:
     assert worker1["action"] in {"move", "collect", "sell"}
 
 
+def test_rocket_tower_site_is_behind_upper_left_base() -> None:
+    from agent.layout import tower_site
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    payload["teamOur"]["roles"] = [
+        role for role in payload["teamOur"]["roles"]
+        if role["roleType"] not in {"gatling", "railgun", "rocket"}
+    ]
+    turn = Turn.load(payload)
+    station = turn.station()
+    site = tower_site(turn, "rocket")
+    assert station is not None
+    assert site is not None
+    assert site.x < station.pos.x
+
+
 def test_invalid_controller_id_is_rejected_without_exception() -> None:
     from agent.commands import validate_for_turn_detailed
     from agent.protocol import Turn
@@ -273,6 +292,41 @@ def test_night_defence_returns_unassigned_worker_to_station() -> None:
     assert commands["10010"]["action"] == "move"
     assert commands["10011"]["action"] == "move"
     assert commands["10012"]["action"] == "move"
+
+
+def test_active_task_keeps_pioneer_from_night_defence() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.planner import Planner
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    payload["phaseTask"] = "请查询样例数据并回答。"
+    payload["llmResp"] = ""
+    payload["lastCmdResult"] = ""
+    for robot in payload["robot"]["roles"]:
+        robot["targetTeam"] = "challenger"
+    planner = Planner(PersistentMemory(task_position=None), DEFAULT_CONFIG)
+    response = planner.decide(payload)
+    assert response["prompt"]
+    assert "10011" not in response["roleCommandMap"]
+
+
+def test_active_task_answer_is_submitted_even_during_defence() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.planner import Planner
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    payload["phaseTask"] = "请回答 40+2。"
+    payload["llmResp"] = "ANSWER: 42"
+    for robot in payload["robot"]["roles"]:
+        robot["targetTeam"] = "challenger"
+    planner = Planner(PersistentMemory(task_position=None), DEFAULT_CONFIG)
+    response = planner.decide(payload)
+    command = response["roleCommandMap"]["10011"]
+    assert command == {"action": "submitAnswer", "taskAnswer": "42"}
 
 
 def test_malformed_command_fields_are_rejected() -> None:

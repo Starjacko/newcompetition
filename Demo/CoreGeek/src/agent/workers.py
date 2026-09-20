@@ -1,7 +1,7 @@
 from .commands import build, collect
 from .config import StrategyConfig
 from .economy import buy_upgrade, move_to, nearest_zone, plan_upgrade, sell_backpack
-from .layout import tower_sites, wall_targets
+from .layout import tower_site, wall_targets
 from .memory import PersistentMemory
 from .protocol import Pos, Turn, Unit, WALL, WEAPON_BUILD_COST, distance, worker_slot
 
@@ -40,10 +40,12 @@ def plan(turn: Turn, memory: PersistentMemory, config: StrategyConfig) -> dict[i
 
 
 def _worker1(turn: Turn, worker: Unit, memory: PersistentMemory, config: StrategyConfig) -> dict | None:
-    sites = tower_sites(turn)
     existing = {unit.kind for unit in turn.weapons()}
-    for kind, site in zip(config.weapon_build_order, sites):
+    for kind in config.weapon_build_order:
         if kind in existing:
+            continue
+        site = tower_site(turn, kind)
+        if site is None:
             continue
         memory.worker1_phase = "build_weapons"
         if turn.gold < WEAPON_BUILD_COST:

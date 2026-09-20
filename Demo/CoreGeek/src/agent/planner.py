@@ -44,6 +44,11 @@ class Planner:
             mode = "day_operation" if turn.is_day else "night_operation"
             commands, prompt, execute_cmd = self._operate(turn)
 
+        if turn.phase_task and mode != "day_operation" and mode != "night_operation":
+            prompt, execute_cmd = self._keep_active_pioneer_task(
+                turn, commands, prompt, execute_cmd,
+            )
+
         raw_commands = commands
         commands, rejected = validate_for_turn_detailed(turn, commands)
         self.memory.record(commands)
@@ -203,3 +208,24 @@ class Planner:
             prompt = decision.prompt
             execute_cmd = decision.execute_cmd
         return commands, prompt, execute_cmd
+
+    def _keep_active_pioneer_task(
+        self,
+        turn: Turn,
+        commands: dict[int, dict],
+        prompt: str,
+        execute_cmd: str,
+    ) -> tuple[str, str]:
+        pioneers = turn.alive(("pioneer",))
+        if not pioneers:
+            return prompt, execute_cmd
+        pioneer = pioneers[0]
+        decision: PioneerDecision = plan_pioneer(
+            turn, pioneer, self.memory, self.config,
+        )
+        if decision.command is not None:
+            commands[pioneer.unit_id] = decision.command
+        elif decision.prompt or decision.execute_cmd:
+            # 自进化任务期间离开任务点一格会结束任务；只有 prompt/executeCmd 时原地等待。
+            commands.pop(pioneer.unit_id, None)
+        return decision.prompt or prompt, decision.execute_cmd or execute_cmd

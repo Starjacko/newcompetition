@@ -17,17 +17,40 @@ def attack_face(turn: Turn) -> str | None:
 
 
 def tower_sites(turn: Turn) -> tuple[Pos, ...]:
+    plan = tower_site_plan(turn)
+    return tuple(
+        site for kind in ("rocket", "railgun", "gatling")
+        if (site := plan.get(kind)) is not None
+    )
+
+
+def tower_site(turn: Turn, kind: str) -> Pos | None:
+    return tower_site_plan(turn).get(kind)
+
+
+def tower_site_plan(turn: Turn) -> dict[str, Pos]:
     station = turn.station()
     if station is None:
-        return ()
+        return {}
     footprint = station_footprint(station.pos)
     occupied = turn.occupied_cells()
-    candidates = [
-        pos for pos in _ring(footprint)
-        if turn.land(pos) and pos not in occupied
-    ]
-    candidates.sort(key=lambda pos: (_face_distance(turn, pos), pos.x, pos.y))
-    return tuple(candidates[:3])
+    front, back, side = _tower_candidate_groups(turn, footprint)
+    plan: dict[str, Pos] = {}
+    reserved: set[Pos] = set()
+    preferences = {
+        # 火箭射程最长，放在基地背面可以减少第三座塔把正面通路卡死的概率。
+        "rocket": back + side + front,
+        "railgun": front + side + back,
+        "gatling": front + side + back,
+    }
+    for kind in ("rocket", "railgun", "gatling"):
+        for pos in preferences[kind]:
+            if pos in occupied or pos in reserved or not turn.land(pos):
+                continue
+            plan[kind] = pos
+            reserved.add(pos)
+            break
+    return plan
 
 
 def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Pos, ...]]:
@@ -62,6 +85,29 @@ def _ring(footprint: tuple[Pos, ...]) -> tuple[Pos, ...]:
                 if dx or dy:
                     result.add(Pos(cell.x + dx, cell.y + dy))
     return tuple(result)
+
+
+def _tower_candidate_groups(
+    turn: Turn,
+    footprint: tuple[Pos, ...],
+) -> tuple[list[Pos], list[Pos], list[Pos]]:
+    xs = [cell.x for cell in footprint]
+    ys = [cell.y for cell in footprint]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    middle_y = (ymin + ymax) / 2
+    ring = list(_ring(footprint))
+    if attack_face(turn) == "right":
+        front = [pos for pos in ring if pos.x > xmax]
+        back = [pos for pos in ring if pos.x < xmin]
+    else:
+        front = [pos for pos in ring if pos.x < xmin]
+        back = [pos for pos in ring if pos.x > xmax]
+    side = [pos for pos in ring if xmin <= pos.x <= xmax]
+    front.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, _face_distance(turn, pos)))
+    back.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, pos.x))
+    side.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, pos.x))
+    return front, back, side
 
 
 def _face_distance(turn: Turn, pos: Pos) -> int:

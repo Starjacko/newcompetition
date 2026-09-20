@@ -53,14 +53,15 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
     )
     if memory.pioneer_agent_phase == "answering":
         if turn.llm_resp:
+            answer = _extract_answer(turn.llm_resp) or turn.llm_resp.strip()
             memory.pioneer_agent_phase = "submitted"
             memory.remember_sop(
                 memory.task_type or "unknown",
-                prompt=turn.llm_resp,
+                prompt=answer,
             )
-            return PioneerDecision(command=submit_answer(turn.llm_resp))
+            return PioneerDecision(command=submit_answer(answer))
         return PioneerDecision(
-            prompt="请只输出当前自进化任务的最终答案，不要解释过程：\n"
+            prompt="请只输出当前自进化任务的最终答案；如果需要前缀，请使用 ANSWER:。\n"
             f"{turn.phase_task}\n沙盒输出：\n{turn.last_cmd_result}",
         )
     if turn.last_cmd_result:
@@ -71,12 +72,22 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
             output=turn.last_cmd_result,
         )
         return PioneerDecision(
-            prompt="请根据当前自进化任务描述和沙盒输出，生成最终答案：\n"
+            prompt="请根据当前自进化任务描述和沙盒输出生成最终答案，只输出 ANSWER: 后的答案：\n"
             f"{turn.phase_task}\n沙盒输出：\n{turn.last_cmd_result}",
         )
     if turn.llm_resp:
-        memory.pioneer_agent_phase = "executing"
+        answer = _extract_answer(turn.llm_resp)
+        if answer:
+            memory.pioneer_agent_phase = "submitted"
+            memory.remember_sop(memory.task_type or "unknown", prompt=answer)
+            return PioneerDecision(command=submit_answer(answer))
         command = _extract_command(turn.llm_resp)
+        if not command:
+            return PioneerDecision(
+                prompt="请为当前自进化任务输出一条可执行探索命令，格式为 CMD: <命令>。\n"
+                f"{turn.phase_task}",
+            )
+        memory.pioneer_agent_phase = "executing"
         memory.remember_sop(
             memory.task_type or "unknown",
             execute_cmd=command,
@@ -85,9 +96,9 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
     sop = memory.sop_library.get(memory.task_type or "")
     return PioneerDecision(
         prompt=(
-            "你是自进化任务执行 Agent。请阅读任务描述，先给出可在无网络沙盒中执行的"
-            "最小探索命令，只使用基础 shell/python，并在下一轮根据输出继续。"
-            "如果下方有历史 SOP，请优先验证并复用。任务：\n"
+            "你是自进化任务执行 Agent。请阅读任务描述：如果已经能确定最终答案，"
+            "只输出 ANSWER: <答案>；否则只输出一条 CMD: <可在无网络沙盒中执行的探索命令>，"
+            "只能使用基础 shell/python。若有历史 SOP，请优先验证并复用。任务：\n"
             f"{turn.phase_task}\n历史 SOP：\n{sop or '暂无'}"
         ),
     )
@@ -96,6 +107,10 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
 def _extract_command(response: str) -> str:
     """Keep the LLM adapter small so command-format changes stay local."""
     text = response.strip()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("CMD:"):
+            return stripped[4:].strip()
     if "```" in text:
         parts = text.split("```")
         if len(parts) >= 3:
@@ -105,6 +120,14 @@ def _extract_command(response: str) -> str:
                 if first.strip().lower() in {"sh", "bash", "shell", "python", "python3"}:
                     text = rest
     return text.strip()
+
+
+def _extract_answer(response: str) -> str:
+    for line in response.strip().splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("ANSWER:"):
+            return stripped[7:].strip()
+    return ""
 
 
 def _best_task(turn: Turn):
