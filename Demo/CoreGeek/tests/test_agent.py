@@ -379,6 +379,10 @@ def test_use_requires_target_for_targeted_items() -> None:
 
     payload = load_payload()
     payload["roundNo"] = 1
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    worker["pos"] = {"x": 5, "y": 22}
     turn = Turn.load(payload)
     accepted = validate_for_turn(
         turn,
@@ -386,7 +390,7 @@ def test_use_requires_target_for_targeted_items() -> None:
             10010: {
                 "action": "use",
                 "name": "WallFixer",
-                "targetPos": [{"x": 1, "y": 1}],
+                "targetPos": [{"x": 5, "y": 21}],
             },
             10011: {"action": "use", "name": "Medicine"},
         },
@@ -395,10 +399,108 @@ def test_use_requires_target_for_targeted_items() -> None:
         10010: {
             "action": "use",
             "name": "WallFixer",
-            "targetPos": [{"x": 1, "y": 1}],
+            "targetPos": [{"x": 5, "y": 21}],
         },
         10011: {"action": "use", "name": "Medicine"},
     }
+
+
+def test_use_rejects_missing_or_wrong_building_target() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    worker["pos"] = {"x": 5, "y": 22}
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10010: {"action": "use", "name": "WallFixer"},
+            10011: {
+                "action": "use",
+                "name": "WeaponUpgradeVoucher1",
+                "targetPos": [{"x": 5, "y": 21}],
+            },
+        },
+    )
+    assert accepted == {}
+
+
+def test_use_allows_optional_target_for_non_targeted_items() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10011: {
+                "action": "use",
+                "name": "Medicine",
+                "targetPos": [{"x": 1, "y": 1}],
+            }
+        },
+    )
+    assert accepted[10011]["action"] == "use"
+
+
+def test_attack_rejects_out_of_range_target() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    worker["pos"] = {"x": 8, "y": 24}
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10020: {
+                "action": "attack",
+                "controllerId": "10010",
+                "targetPos": [{"x": 30, "y": 30}],
+            }
+        },
+    )
+    assert accepted == {}
+
+
+def test_gatling_rejects_targets_outside_same_cone() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    gatling = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10020
+    )
+    worker["pos"] = {"x": 8, "y": 24}
+    gatling["level"] = 2
+    gatling["attackRange"] = 5
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10020: {
+                "action": "attack",
+                "controllerId": "10010",
+                "targetPos": [{"x": 13, "y": 24}, {"x": 5, "y": 24}],
+            }
+        },
+    )
+    assert accepted == {}
 
 
 def test_only_worker2_collects_count_toward_worker2_mine() -> None:

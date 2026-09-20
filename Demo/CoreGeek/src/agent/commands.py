@@ -3,10 +3,13 @@ from typing import Any
 from .protocol import (
     CONTROLLABLE_TYPES,
     PIONEER,
+    STATION,
     TOWER_TYPES,
+    WALL,
     WORKER,
     Turn,
     Pos,
+    Unit,
     distance,
 )
 
@@ -22,6 +25,9 @@ TARGET_REQUIRED_ITEMS = {
     "StationUpgradeVoucher1",
     "StationUpgradeVoucher2",
 }
+WEAPON_UPGRADE_ITEMS = {"WeaponUpgradeVoucher1", "WeaponUpgradeVoucher2"}
+WALL_TARGET_ITEMS = {"WallFixer", "WallUpgradeVoucher1", "WallUpgradeVoucher2"}
+STATION_UPGRADE_ITEMS = {"StationUpgradeVoucher1", "StationUpgradeVoucher2"}
 
 
 def _positions(positions: Pos | list[Pos] | tuple[Pos, ...]) -> list[dict[str, int]]:
@@ -278,16 +284,24 @@ def validate_for_turn_detailed(
                 if len(command["targetPos"]) != expected:
                     allowed = False
                     reason = "invalid_target_count"
+                elif any(
+                    distance(actor.pos, Pos.load(target)) > actor.range_of_attack()
+                    for target in command["targetPos"]
+                ):
+                    allowed = False
+                    reason = "target_out_of_attack_range"
+                elif actor.kind == "gatling" and not _same_gatling_cone(actor, command):
+                    allowed = False
+                    reason = "gatling_targets_not_same_cone"
         if action == "use" and allowed:
             name = command["name"]
             has_target = "targetPos" in command
             if name in TARGET_REQUIRED_ITEMS and not has_target:
                 allowed = False
                 reason = "target_required_for_item"
-            elif name in {"Medicine"} or name.endswith("RobotSummonOrder"):
-                if has_target:
-                    allowed = False
-                    reason = "target_not_allowed_for_item"
+            elif has_target:
+                target = Pos.load(command["targetPos"][0])
+                allowed, reason = _validate_use_target(turn, actor, name, target)
         if action == "summonTreasure" and allowed:
             if distance(actor.pos, Pos.load(command["targetPos"][0])) > 1:
                 allowed = False
@@ -309,3 +323,50 @@ def _is_int_like(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return value is not None and not isinstance(value, bool)
+
+
+def _same_gatling_cone(weapon: Unit, command: dict[str, Any]) -> bool:
+    """加特林多目标必须处于同一 90 度锥形内，这是任务书明确非法条件。"""
+    targets = [Pos.load(target) for target in command["targetPos"]]
+    for index, first in enumerate(targets):
+        first_dx = first.x - weapon.pos.x
+        first_dy = first.y - weapon.pos.y
+        for second in targets[index + 1:]:
+            second_dx = second.x - weapon.pos.x
+            second_dy = second.y - weapon.pos.y
+            if first_dx * second_dx + first_dy * second_dy < 0:
+                return False
+    return True
+
+
+def _validate_use_target(
+    turn: Turn,
+    actor: Unit,
+    name: str,
+    target: Pos,
+) -> tuple[bool, str]:
+    if name in WEAPON_UPGRADE_ITEMS:
+        return _target_building(turn, target, TOWER_TYPES, actor)
+    if name in WALL_TARGET_ITEMS:
+        return _target_building(turn, target, (WALL,), actor)
+    if name in STATION_UPGRADE_ITEMS:
+        return _target_building(turn, target, (STATION,), actor)
+    # Medicine 和机器人召唤令没有目标要求；如果传了合法 targetPos，也不把它升级为接口错误。
+    return True, ""
+
+
+def _target_building(
+    turn: Turn,
+    target: Pos,
+    kinds: tuple[str, ...],
+    actor: Unit,
+) -> tuple[bool, str]:
+    building = next(
+        (unit for unit in turn.ours if unit.kind in kinds and unit.pos == target),
+        None,
+    )
+    if building is None:
+        return False, "target_building_type_mismatch"
+    if distance(actor.pos, target) > 1:
+        return False, "target_out_of_interaction_range"
+    return True, ""

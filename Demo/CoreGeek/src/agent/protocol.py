@@ -14,10 +14,12 @@ WORKER = "worker"
 PIONEER = "pioneer"
 TOWER_TYPES = ("gatling", "railgun", "rocket")
 CONTROLLABLE_TYPES = (WORKER, PIONEER)
+FULL_MAP_RANGE = 10**9
 TOWER_RANGE_BY_LEVEL = {
     "gatling": (3, 5, 7),
     "railgun": (6, 8, 10),
-    "rocket": (10, 15, 10**9),
+    # 任务书规定 3 级火箭是全图射程；内部用足够大的数统一走距离判断。
+    "rocket": (10, 15, FULL_MAP_RANGE),
 }
 
 
@@ -334,23 +336,3 @@ class Turn:
         for robot in self.robots:
             cells.add(robot.pos)
         return frozenset(cells)
-
-
-def move_command(pos: Pos) -> dict[str, Any]:
-    return {"action": "move", "targetPos": [pos.dump()]}
-
-
-def collect_command(pos: Pos) -> dict[str, Any]:
-    return {"action": "collect", "targetPos": [pos.dump()]}
-
-
-def build_command(pos: Pos, name: str) -> dict[str, Any]:
-    return {"action": "build", "targetPos": [pos.dump()], "name": name}
-
-
-def attack_command(controller_id: int, pos: Pos) -> dict[str, Any]:
-    return {
-        "action": "attack",
-        "targetPos": [pos.dump()],
-        "controllerId": str(controller_id),
-    }
