@@ -82,7 +82,7 @@ def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Po
     ]
     lower = [
         Pos(x, ymin - 2)
-        for x in range(xmax + 1, xmin - 2, -1)
+        for x in range(xmin - 1, xmax + 2)
     ]
     return (
         tuple(pos for pos in front if turn.land(pos)),

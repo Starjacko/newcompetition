@@ -13,15 +13,17 @@ class StrategyConfig:
     vendor_mine_order: tuple[str, ...] = ("iron", "copper", "stone")
     weapon_build_order: tuple[str, ...] = ("rocket", "railgun", "gatling")
     upgrade_queue: tuple[tuple[str, str], ...] = (
+        # 先把武器升级完成，再投入基地和围墙升级资源。
         ("WeaponUpgradeVoucher1", "rocket"),
-        ("StationUpgradeVoucher1", "station"),
-        ("WeaponUpgradeVoucher2", "rocket"),
         ("WeaponUpgradeVoucher1", "railgun"),
-        ("WallUpgradeVoucher1", "front_wall"),
-        ("StationUpgradeVoucher2", "station"),
-        ("WeaponUpgradeVoucher2", "railgun"),
-        ("WallUpgradeVoucher2", "front_wall"),
         ("WeaponUpgradeVoucher1", "gatling"),
+        ("WeaponUpgradeVoucher2", "rocket"),
+        ("WeaponUpgradeVoucher2", "railgun"),
+        ("WeaponUpgradeVoucher2", "gatling"),
+        ("StationUpgradeVoucher1", "station"),
+        ("StationUpgradeVoucher2", "station"),
+        ("WallUpgradeVoucher1", "front_wall"),
+        ("WallUpgradeVoucher2", "front_wall"),
     )
 
 

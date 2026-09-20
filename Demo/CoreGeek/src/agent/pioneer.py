@@ -51,15 +51,17 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
     memory.remember_sop(memory.task_type or "unknown", output=cmd_output)
     if memory.pioneer_agent_phase == "answering":
         if turn.llm_resp:
-            answer = _extract_answer(turn.llm_resp) or turn.llm_resp.strip()
-            memory.pioneer_agent_phase = "submitted"
-            memory.remember_sop(
-                memory.task_type or "unknown",
-                prompt=answer,
-            )
-            return PioneerDecision(command=submit_answer(answer))
+            answer = _extract_answer(turn.llm_resp)
+            if answer:
+                memory.pioneer_agent_phase = "submitted"
+                memory.remember_sop(
+                    memory.task_type or "unknown",
+                    prompt=answer,
+                )
+                return PioneerDecision(command=submit_answer(answer))
         return PioneerDecision(
-            prompt="请只输出当前自进化任务的最终答案；如果需要前缀，请使用 ANSWER:。\n"
+            prompt="请只输出当前自进化任务的最终答案，必须使用 ANSWER: <答案> 格式，"
+            "不要输出解释或代码：\n"
             f"{turn.phase_task}\n沙盒输出：\n{cmd_output}",
         )
     if cmd_output:

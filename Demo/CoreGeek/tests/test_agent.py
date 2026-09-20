@@ -176,6 +176,46 @@ def test_upper_left_wall_targets_have_requested_counts() -> None:
     assert all(pos.x > station.pos.x for pos in front)
 
 
+def test_lower_right_wall_targets_mirror_main_side_and_scan_left_to_right() -> None:
+    from agent.layout import wall_targets
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    station = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["roleType"] == "station"
+    )
+    station["pos"] = {"x": 35, "y": 5}
+    turn = Turn.load(payload)
+    front, upper, lower = wall_targets(turn)
+    assert len(front) == 6
+    assert len(upper) == 4
+    assert len(lower) == 4
+    assert all(pos.x < station["pos"]["x"] for pos in front)
+    assert [pos.x for pos in upper] == sorted(pos.x for pos in upper)
+    assert [pos.x for pos in lower] == sorted(pos.x for pos in lower)
+
+
+def test_weapon_upgrade_queue_skips_already_upgraded_target() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.economy import choose_upgrade
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["teamOur"]["roles"] = [
+        dict(role, level=(2 if role["roleType"] == "rocket" else role.get("level", 1)))
+        for role in payload["teamOur"]["roles"]
+    ]
+    turn = Turn.load(payload)
+    selected = choose_upgrade(
+        turn,
+        ("WeaponUpgradeVoucher1",),
+        DEFAULT_CONFIG,
+    )
+    assert selected == ("WeaponUpgradeVoucher1", "railgun")
+
+
 def test_invalid_controller_id_is_rejected_without_exception() -> None:
     from agent.commands import validate_for_turn_detailed
     from agent.protocol import Turn
