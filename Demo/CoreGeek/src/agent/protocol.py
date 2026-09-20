@@ -21,6 +21,16 @@ TOWER_RANGE_BY_LEVEL = {
 }
 
 
+def worker_slot(unit_id: int) -> int | None:
+    """Map documented worker IDs to stable slots: *10 is worker1, *12 worker2."""
+    suffix = unit_id % 100
+    if suffix == 10:
+        return 1
+    if suffix == 12:
+        return 2
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class Pos:
     x: int

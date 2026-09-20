@@ -4,7 +4,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
-from .protocol import Pos, Turn
+from .protocol import Pos, Turn, worker_slot
 
 
 @dataclass
@@ -51,12 +51,13 @@ class PersistentMemory:
             self.reset_runtime()
         self.team_type = turn.team_type or self.team_type
         self.team_id = turn.team_id or self.team_id
-        worker_ids = [worker.unit_id for worker in turn.workers()]
-        worker2_id = max(worker_ids, default=None)
         for role_id, success in turn.last_action_results.items():
             if success:
                 previous = self.last_plans.get(role_id) or {}
-                if role_id == worker2_id and previous.get("action") == "collect":
+                if (
+                    worker_slot(role_id) == 2
+                    and previous.get("action") == "collect"
+                ):
                     # collect 的成功结果在下一回合才返回，因此在这里累计采矿次数。
                     target = _plan_target(previous)
                     if target is not None and target == self.worker2_mine:

@@ -286,6 +286,121 @@ def test_malformed_command_fields_are_rejected() -> None:
     assert accepted == {}
 
 
+def test_remove_is_not_artificially_limited_to_daytime() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    worker["pos"] = {"x": 5, "y": 22}
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10010: {
+                "action": "remove",
+                "targetPos": [{"x": 5, "y": 21}],
+            }
+        },
+    )
+    assert accepted[10010]["action"] == "remove"
+
+
+def test_remove_requires_an_actual_wall_target() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    worker = next(
+        role for role in payload["teamOur"]["roles"] if role["id"] == 10010
+    )
+    worker["pos"] = {"x": 5, "y": 22}
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10010: {
+                "action": "remove",
+                "targetPos": [{"x": 5, "y": 22}],
+            }
+        },
+    )
+    assert accepted == {}
+
+
+def test_worker_slot_does_not_change_when_worker1_is_dead() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+    from agent.workers import plan
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    for role in payload["teamOur"]["roles"]:
+        if role["id"] == 10010:
+            role["health"] = 0
+    turn = Turn.load(payload)
+    memory = PersistentMemory()
+    commands = plan(turn, memory, DEFAULT_CONFIG)
+    assert memory.worker1_phase == "build_weapons"
+    assert commands.get(10012, {}).get("action") in {
+        "move", "collect", "sell", "buy", "use",
+    }
+
+
+def test_attack_requires_controller_near_tower() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 71
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10040: {
+                "action": "attack",
+                "controllerId": "10010",
+                "targetPos": [{"x": 4, "y": 4}],
+            }
+        },
+    )
+    assert accepted == {}
+
+
+def test_use_requires_target_for_targeted_items() -> None:
+    from agent.commands import validate_for_turn
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    turn = Turn.load(payload)
+    accepted = validate_for_turn(
+        turn,
+        {
+            10010: {
+                "action": "use",
+                "name": "WallFixer",
+                "targetPos": [{"x": 1, "y": 1}],
+            },
+            10011: {"action": "use", "name": "Medicine"},
+        },
+    )
+    assert accepted == {
+        10010: {
+            "action": "use",
+            "name": "WallFixer",
+            "targetPos": [{"x": 1, "y": 1}],
+        },
+        10011: {"action": "use", "name": "Medicine"},
+    }
+
+
 def test_only_worker2_collects_count_toward_worker2_mine() -> None:
     from agent.memory import PersistentMemory
     from agent.protocol import Turn

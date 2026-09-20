@@ -1,6 +1,27 @@
 from typing import Any
 
-from .protocol import CONTROLLABLE_TYPES, TOWER_TYPES, WORKER, Turn, Pos
+from .protocol import (
+    CONTROLLABLE_TYPES,
+    PIONEER,
+    TOWER_TYPES,
+    WORKER,
+    Turn,
+    Pos,
+    distance,
+)
+
+
+TARGET_REQUIRED_ITEMS = {
+    "WallFixer",
+    "DizzyWeapon",
+    "Bomb",
+    "WeaponUpgradeVoucher1",
+    "WeaponUpgradeVoucher2",
+    "WallUpgradeVoucher1",
+    "WallUpgradeVoucher2",
+    "StationUpgradeVoucher1",
+    "StationUpgradeVoucher2",
+}
 
 
 def _positions(positions: Pos | list[Pos] | tuple[Pos, ...]) -> list[dict[str, int]]:
@@ -98,6 +119,12 @@ def validate_commands(commands: dict[int, dict[str, Any]]) -> dict[int, dict[str
                 continue
             if action == "use" and "targetPos" in command and not _valid_positions(command["targetPos"]):
                 continue
+            if action in {"move", "build", "remove", "collect", "summonTreasure"}:
+                if len(command.get("targetPos", [])) != 1:
+                    continue
+            if action == "use" and "targetPos" in command:
+                if len(command["targetPos"]) != 1:
+                    continue
         if action == "attack":
             controller_id = command.get("controllerId")
             try:
@@ -191,10 +218,14 @@ def validate_for_turn_detailed(
                 reason = "attack_permission_or_duplicate_controller"
             if allowed:
                 controllers.add(controller_id)
-        elif action in {"build", "remove", "collect"}:
+        elif action in {"build", "collect"}:
             allowed = turn.is_day and actor.kind == WORKER
             if not allowed:
                 reason = "worker_day_only"
+        elif action == "remove":
+            allowed = actor.kind == WORKER
+            if not allowed:
+                reason = "worker_only"
         elif action in {"acceptTask", "submitAnswer", "summonTreasure"}:
             allowed = actor.kind == PIONEER
             if not allowed:
@@ -215,9 +246,52 @@ def validate_for_turn_detailed(
                 allowed = False
                 reason = "target_out_of_interaction_range"
         if action == "remove":
-            allowed = allowed and bool(turn.walls())
+            target = Pos.load(command["targetPos"][0])
+            allowed = allowed and any(
+                wall.pos == target for wall in turn.walls()
+            )
             if not allowed and not reason:
-                reason = "no_wall_to_remove"
+                reason = "target_is_not_wall"
+        if action == "collect" and allowed:
+            target = Pos.load(command["targetPos"][0])
+            if target not in turn.mines():
+                allowed = False
+                reason = "target_is_not_mine"
+        if action == "attack" and allowed:
+            controller_id = int(command["controllerId"])
+            controller = next(
+                (
+                    unit for unit in turn.alive(CONTROLLABLE_TYPES)
+                    if unit.unit_id == controller_id
+                ),
+                None,
+            )
+            if controller is None or distance(controller.pos, actor.pos) > 1:
+                allowed = False
+                reason = "controller_out_of_range"
+            else:
+                expected = (
+                    max(actor.level, 1)
+                    if actor.kind in {"gatling", "rocket"}
+                    else 1
+                )
+                if len(command["targetPos"]) != expected:
+                    allowed = False
+                    reason = "invalid_target_count"
+        if action == "use" and allowed:
+            name = command["name"]
+            has_target = "targetPos" in command
+            if name in TARGET_REQUIRED_ITEMS and not has_target:
+                allowed = False
+                reason = "target_required_for_item"
+            elif name in {"Medicine"} or name.endswith("RobotSummonOrder"):
+                if has_target:
+                    allowed = False
+                    reason = "target_not_allowed_for_item"
+        if action == "summonTreasure" and allowed:
+            if distance(actor.pos, Pos.load(command["targetPos"][0])) > 1:
+                allowed = False
+                reason = "target_out_of_interaction_range"
         if allowed:
             result[role_id] = command
         else:

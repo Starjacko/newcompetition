@@ -5,7 +5,7 @@ from .layout import attack_face, base_corner
 from .logging_utils import event, get_logger
 from .memory import PersistentMemory
 from .pioneer import PioneerDecision, plan as plan_pioneer
-from .protocol import Turn, distance
+from .protocol import Turn, distance, worker_slot
 from .trace import command_snapshot, role_snapshot, turn_snapshot
 from .workers import plan as plan_workers
 from .grid import next_step_near
@@ -92,10 +92,20 @@ class Planner:
         station = turn.station()
         preferred = {"pioneer": "railgun"}
         workers = turn.workers()
-        if workers:
-            worker1 = min(workers, key=lambda role: role.unit_id)
-            worker2 = max(workers, key=lambda role: role.unit_id)
+        worker1 = next(
+            (role for role in workers if worker_slot(role.unit_id) == 1),
+            None,
+        )
+        worker2 = next(
+            (role for role in workers if worker_slot(role.unit_id) == 2),
+            None,
+        )
+        if not workers or not any(worker_slot(role.unit_id) in {1, 2} for role in workers):
+            worker1 = min(workers, key=lambda role: role.unit_id, default=None)
+            worker2 = max(workers, key=lambda role: role.unit_id, default=None)
+        if worker1 is not None:
             preferred[worker1.unit_id] = "rocket"
+        if worker2 is not None:
             preferred[worker2.unit_id] = "gatling"
         for role in turn.controllable():
             if not self.memory.failed_repeatedly(role.unit_id, turn.round_no):
@@ -165,10 +175,16 @@ class Planner:
         workers = turn.workers()
         if role.kind == "pioneer":
             kind = "railgun"
-        elif workers and role.unit_id == min(worker.unit_id for worker in workers):
+        elif worker_slot(role.unit_id) == 1:
             kind = "rocket"
-        elif workers and role.unit_id == max(worker.unit_id for worker in workers):
+        elif worker_slot(role.unit_id) == 2:
             kind = "gatling"
+        elif workers and not any(worker_slot(worker.unit_id) in {1, 2} for worker in workers):
+            kind = (
+                "rocket"
+                if role.unit_id == min(worker.unit_id for worker in workers)
+                else "gatling"
+            )
         else:
             kind = ""
         return weapons.get(kind)

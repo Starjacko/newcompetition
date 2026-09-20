@@ -3,7 +3,7 @@ from .config import StrategyConfig
 from .economy import buy_upgrade, move_to, nearest_zone, plan_upgrade, sell_backpack
 from .layout import tower_sites, wall_targets
 from .memory import PersistentMemory
-from .protocol import Pos, Turn, Unit, WALL, WEAPON_BUILD_COST, distance
+from .protocol import Pos, Turn, Unit, WALL, WEAPON_BUILD_COST, distance, worker_slot
 
 
 def plan(turn: Turn, memory: PersistentMemory, config: StrategyConfig) -> dict[int, dict]:
@@ -11,7 +11,22 @@ def plan(turn: Turn, memory: PersistentMemory, config: StrategyConfig) -> dict[i
     workers = turn.workers()
     if not workers:
         return commands
-    worker1_id = min(worker.unit_id for worker in workers)
+    worker1 = next(
+        (worker for worker in workers if worker_slot(worker.unit_id) == 1),
+        None,
+    )
+    has_documented_slots = any(
+        worker_slot(worker.unit_id) in {1, 2} for worker in workers
+    )
+    worker1_id = (
+        worker1.unit_id
+        if worker1 is not None
+        else (
+            min(worker.unit_id for worker in workers)
+            if not has_documented_slots
+            else None
+        )
+    )
     for worker in workers:
         # 工人职责按稳定 ID 绑定，不根据距离临时换岗，保证流水线状态连续。
         command = (

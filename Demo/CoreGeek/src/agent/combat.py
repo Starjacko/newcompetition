@@ -1,6 +1,6 @@
 from .commands import attack, move
 from .grid import next_step_near
-from .protocol import Robot, Turn, Unit, distance
+from .protocol import Robot, Turn, Unit, distance, worker_slot
 
 
 ROLE_WEAPON_PREFERENCE = {
@@ -65,8 +65,21 @@ def _controllers_by_preference(
     turn: Turn,
 ) -> tuple[tuple[Unit, str], ...]:
     workers = turn.workers()
-    worker1_id = min((worker.unit_id for worker in workers), default=None)
-    worker2_id = max((worker.unit_id for worker in workers), default=None)
+    worker1_id = next(
+        (worker.unit_id for worker in workers if worker_slot(worker.unit_id) == 1),
+        None,
+    )
+    worker2_id = next(
+        (worker.unit_id for worker in workers if worker_slot(worker.unit_id) == 2),
+        None,
+    )
+    has_documented_slots = any(
+        worker_slot(worker.unit_id) in {1, 2} for worker in workers
+    )
+    if worker1_id is None and workers and not has_documented_slots:
+        worker1_id = min(worker.unit_id for worker in workers)
+    if worker2_id is None and workers and not has_documented_slots:
+        worker2_id = max(worker.unit_id for worker in workers)
     result: list[tuple[Unit, str]] = []
     for role in turn.controllable():
         if role.kind == "pioneer":
@@ -110,17 +123,27 @@ def _targets_for(weapon: Unit, threats: tuple[Robot, ...]) -> list:
         ),
     )
     # 炮台等级决定最多可提交的目标数；低等级武器仍只提交一个目标。
-    count = min(max(weapon.level, 1), len(ranked))
-    if weapon.kind not in {"gatling", "rocket"} or count == 1:
-        return [robot.pos for robot in ranked[:count]]
+    count = max(weapon.level, 1)
+    if weapon.kind not in {"gatling", "rocket"}:
+        return [ranked[0].pos]
     primary = ranked[0]
+    if weapon.kind == "rocket":
+        selected = ranked[:count]
+        while len(selected) < count:
+            selected.append(primary)
+        return [robot.pos for robot in selected]
+
     selected = [primary]
     for robot in ranked[1:]:
         if len(selected) >= count:
             break
         if all(_same_cone(weapon, existing, robot) for existing in selected):
             selected.append(robot)
-    return [robot.pos for robot in selected]
+    # 接口要求加特林/火箭目标数组长度等于武器等级。
+    # 目标不足时重复最优落点；火箭规则允许重复落点叠加伤害。
+    while len(selected) < count:
+        selected.append(primary)
+    return [robot.pos for robot in selected[:count]]
 
 
 def _same_cone(weapon: Unit, first: Robot, second: Robot) -> bool:
