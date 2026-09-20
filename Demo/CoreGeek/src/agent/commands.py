@@ -2,7 +2,6 @@ from typing import Any
 
 from .protocol import (
     CONTROLLABLE_TYPES,
-    PIONEER,
     STATION,
     TOWER_TYPES,
     WALL,
@@ -12,6 +11,10 @@ from .protocol import (
     Unit,
     distance,
 )
+
+# 角色值来自接口文档；命令校验不依赖 protocol.py 中的同名别名，
+# 避免部署环境加载旧模块时出现 NameError。
+PIONEER_ROLE = "pioneer"
 
 
 TARGET_REQUIRED_ITEMS = {
@@ -233,7 +236,7 @@ def validate_for_turn_detailed(
             if not allowed:
                 reason = "worker_only"
         elif action in {"acceptTask", "submitAnswer", "summonTreasure"}:
-            allowed = actor.kind == PIONEER
+            allowed = actor.kind == PIONEER_ROLE
             if not allowed:
                 reason = "pioneer_only"
         elif action in {"move", "sell", "buy", "use", "drop"}:
