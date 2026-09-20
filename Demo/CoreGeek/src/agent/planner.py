@@ -5,7 +5,7 @@ from .layout import attack_face, base_corner
 from .logging_utils import event, get_logger
 from .memory import PersistentMemory
 from .pioneer import PioneerDecision, plan as plan_pioneer
-from .protocol import Turn, distance, worker_slot
+from .protocol import Pos, Turn, distance, worker_slot
 from .trace import command_snapshot, role_snapshot, turn_snapshot
 from .workers import plan as plan_workers
 from .grid import next_step_near
@@ -49,6 +49,7 @@ class Planner:
                 turn, commands, prompt, execute_cmd,
             )
 
+        commands = self._dedupe_move_targets(turn, commands)
         raw_commands = commands
         commands, rejected = validate_for_turn_detailed(turn, commands)
         self.memory.record(commands)
@@ -229,3 +230,42 @@ class Planner:
             # 自进化任务期间离开任务点一格会结束任务；只有 prompt/executeCmd 时原地等待。
             commands.pop(pioneer.unit_id, None)
         return decision.prompt or prompt, decision.execute_cmd or execute_cmd
+
+    def _dedupe_move_targets(
+        self,
+        turn: Turn,
+        commands: dict[int, dict],
+    ) -> dict[int, dict]:
+        winners: dict[Pos, int] = {}
+        result: dict[int, dict] = {}
+        for role_id, command in sorted(
+            commands.items(),
+            key=lambda item: self._move_priority(turn, item[0]),
+        ):
+            if command.get("action") != "move":
+                result[role_id] = command
+                continue
+            targets = command.get("targetPos") or []
+            if len(targets) != 1:
+                result[role_id] = command
+                continue
+            try:
+                target = Pos.load(targets[0])
+            except (KeyError, TypeError, ValueError):
+                result[role_id] = command
+                continue
+            if target in winners:
+                continue
+            winners[target] = role_id
+            result[role_id] = command
+        return result
+
+    def _move_priority(self, turn: Turn, role_id: int) -> tuple[int, int]:
+        role = next((unit for unit in turn.ours if unit.unit_id == role_id), None)
+        if role is not None and role.kind == "pioneer" and turn.phase_task:
+            return (0, role_id)
+        if worker_slot(role_id) == 1:
+            return (1, role_id)
+        if worker_slot(role_id) == 2:
+            return (2, role_id)
+        return (3, role_id)

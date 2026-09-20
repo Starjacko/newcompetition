@@ -64,12 +64,26 @@ def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Po
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
     face = attack_face(turn)
+    # 基地两格宽、两格高：主攻面向外延伸为 6 格，上下各 4 格。
+    # 左上基地的主攻面是右侧，右下基地则镜像到左侧。
     if face == "right":
-        front = [Pos(xmax + 2, y) for y in range(ymax, ymin - 1, -1)]
+        front = [
+            Pos(xmax + 2, y)
+            for y in range(ymin - 2, ymax + 3)
+        ]
     else:
-        front = [Pos(xmin - 2, y) for y in range(ymin, ymax + 1)]
-    upper = [Pos(x, ymax + 2) for x in range(xmin - 1, xmax + 2)]
-    lower = [Pos(x, ymin - 2) for x in range(xmax + 1, xmin - 2, -1)]
+        front = [
+            Pos(xmin - 2, y)
+            for y in range(ymin - 2, ymax + 3)
+        ]
+    upper = [
+        Pos(x, ymax + 2)
+        for x in range(xmin - 1, xmax + 2)
+    ]
+    lower = [
+        Pos(x, ymin - 2)
+        for x in range(xmax + 1, xmin - 2, -1)
+    ]
     return (
         tuple(pos for pos in front if turn.land(pos)),
         tuple(pos for pos in upper if turn.land(pos)),

@@ -47,10 +47,8 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
     if memory.task_position is not None and distance(pioneer.pos, memory.task_position) > 1:
         step = next_step_near(turn, pioneer, memory.task_position)
         return PioneerDecision(command=move(step) if step else None)
-    memory.remember_sop(
-        memory.task_type or "unknown",
-        output=turn.last_cmd_result,
-    )
+    cmd_output = _usable_cmd_output(turn.last_cmd_result)
+    memory.remember_sop(memory.task_type or "unknown", output=cmd_output)
     if memory.pioneer_agent_phase == "answering":
         if turn.llm_resp:
             answer = _extract_answer(turn.llm_resp) or turn.llm_resp.strip()
@@ -62,18 +60,18 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
             return PioneerDecision(command=submit_answer(answer))
         return PioneerDecision(
             prompt="请只输出当前自进化任务的最终答案；如果需要前缀，请使用 ANSWER:。\n"
-            f"{turn.phase_task}\n沙盒输出：\n{turn.last_cmd_result}",
+            f"{turn.phase_task}\n沙盒输出：\n{cmd_output}",
         )
-    if turn.last_cmd_result:
+    if cmd_output:
         # 沙盒有输出时，下一步先让 LLM 把探索结果整理成最终答案。
         memory.pioneer_agent_phase = "answering"
         memory.remember_sop(
             memory.task_type or "unknown",
-            output=turn.last_cmd_result,
+            output=cmd_output,
         )
         return PioneerDecision(
             prompt="请根据当前自进化任务描述和沙盒输出生成最终答案，只输出 ANSWER: 后的答案：\n"
-            f"{turn.phase_task}\n沙盒输出：\n{turn.last_cmd_result}",
+            f"{turn.phase_task}\n沙盒输出：\n{cmd_output}",
         )
     if turn.llm_resp:
         answer = _extract_answer(turn.llm_resp)
@@ -128,6 +126,20 @@ def _extract_answer(response: str) -> str:
         if stripped.upper().startswith("ANSWER:"):
             return stripped[7:].strip()
     return ""
+
+
+def _usable_cmd_output(output: str) -> str:
+    text = output.strip()
+    if not text:
+        return ""
+    if text.startswith("[TIMEOUT]") or text.startswith("[JUDGER_ERROR]"):
+        return ""
+    if text.startswith("[exitCode:"):
+        first_line, _, rest = text.partition("\n")
+        if first_line != "[exitCode:0]":
+            return ""
+        return rest.strip()
+    return text
 
 
 def _best_task(turn: Turn):

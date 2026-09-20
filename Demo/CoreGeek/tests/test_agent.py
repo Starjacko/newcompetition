@@ -160,6 +160,22 @@ def test_rocket_tower_site_is_behind_upper_left_base() -> None:
     assert site.x < station.pos.x
 
 
+def test_upper_left_wall_targets_have_requested_counts() -> None:
+    from agent.layout import wall_targets
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    turn = Turn.load(payload)
+    front, upper, lower = wall_targets(turn)
+    station = turn.station()
+    assert station is not None
+    assert len(front) == 6
+    assert len(upper) == 4
+    assert len(lower) == 4
+    assert all(pos.x > station.pos.x for pos in front)
+
+
 def test_invalid_controller_id_is_rejected_without_exception() -> None:
     from agent.commands import validate_for_turn_detailed
     from agent.protocol import Turn
@@ -327,6 +343,46 @@ def test_active_task_answer_is_submitted_even_during_defence() -> None:
     response = planner.decide(payload)
     command = response["roleCommandMap"]["10011"]
     assert command == {"action": "submitAnswer", "taskAnswer": "42"}
+
+
+def test_duplicate_move_targets_are_deduped() -> None:
+    from agent.config import DEFAULT_CONFIG
+    from agent.memory import PersistentMemory
+    from agent.planner import Planner
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    turn = Turn.load(payload)
+    planner = Planner(PersistentMemory(), DEFAULT_CONFIG)
+    commands = planner._dedupe_move_targets(
+        turn,
+        {
+            10010: {"action": "move", "targetPos": [{"x": 6, "y": 22}]},
+            10012: {"action": "move", "targetPos": [{"x": 6, "y": 22}]},
+            10011: {"action": "move", "targetPos": [{"x": 9, "y": 13}]},
+        },
+    )
+    targets = [
+        tuple(command["targetPos"][0].values())
+        for command in commands.values()
+        if command["action"] == "move"
+    ]
+    assert len(targets) == len(set(targets))
+
+
+def test_active_task_uses_successful_cmd_output_for_answer_prompt() -> None:
+    from agent.memory import PersistentMemory
+    from agent.pioneer import plan
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["phaseTask"] = "请根据文件输出回答。"
+    payload["lastCmdResult"] = "[exitCode:0]\nresult=42"
+    payload["llmResp"] = ""
+    turn = Turn.load(payload)
+    pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
+    decision = plan(turn, pioneer, PersistentMemory(), None)
+    assert "result=42" in decision.prompt
 
 
 def test_malformed_command_fields_are_rejected() -> None:
