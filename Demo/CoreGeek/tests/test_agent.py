@@ -327,6 +327,38 @@ def test_worker2_sells_before_using_upgrade_voucher() -> None:
     assert command["action"] in {"move", "sell"}
 
 
+def test_worker2_buys_weapon_upgrade_after_finished_batch() -> None:
+    from agent.config import StrategyConfig
+    from agent.memory import PersistentMemory
+    from agent.protocol import Turn
+    from agent.workers import _worker2
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    payload["teamOur"]["goldNum"] = 100
+    worker = next(
+        role for role in payload["teamOur"]["roles"]
+        if role["id"] == 10012
+    )
+    worker["backpack"] = []
+    turn = Turn.load(payload)
+    memory = PersistentMemory(
+        worker2_mine=next(iter(turn.mines("iron"))),
+        worker2_mine_collects=10,
+    )
+    command = _worker2(turn, turn.workers()[1], memory, StrategyConfig())
+    assert command is not None
+    assert command["action"] == "move"
+
+    worker["pos"] = next(iter(turn.zones_of("weaponShop"))).dump()
+    turn_at_shop = Turn.load(payload)
+    command = _worker2(turn_at_shop, turn_at_shop.workers()[1], memory, StrategyConfig())
+    assert command is not None
+    assert command["action"] == "buy"
+    assert command["name"] == "WeaponUpgradeVoucher1"
+
+
 def test_night_defence_returns_unassigned_worker_to_station() -> None:
     from agent.brain import decide
 
@@ -423,6 +455,25 @@ def test_active_task_uses_successful_cmd_output_for_answer_prompt() -> None:
     pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
     decision = plan(turn, pioneer, PersistentMemory(), None)
     assert "result=42" in decision.prompt
+
+
+def test_active_task_accepts_unprefixed_final_answer() -> None:
+    from agent.memory import PersistentMemory
+    from agent.pioneer import plan
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["phaseTask"] = "请根据文件输出回答。"
+    payload["lastCmdResult"] = "[exitCode:0]\nresult=42"
+    payload["llmResp"] = "42"
+    turn = Turn.load(payload)
+    pioneer = next(unit for unit in turn.ours if unit.kind == "pioneer")
+    memory = PersistentMemory(
+        task_position=pioneer.pos,
+        pioneer_agent_phase="answering",
+    )
+    decision = plan(turn, pioneer, memory, None)
+    assert decision.command == {"action": "submitAnswer", "taskAnswer": "42"}
 
 
 def test_malformed_command_fields_are_rejected() -> None:

@@ -85,6 +85,36 @@ def buy_upgrade(turn: Turn, role: Unit, config: StrategyConfig) -> dict | None:
     return None
 
 
+def plan_buy_upgrade(turn: Turn, role: Unit, config: StrategyConfig) -> dict | None:
+    """在卖完当前矿批后，优先把买得起的升级券送入购买流程。"""
+    if not _has_affordable_upgrade(turn, config):
+        return None
+    shop = nearest_zone(turn, role, "weaponShop")
+    if shop is None:
+        return None
+    if distance(role.pos, shop) > 1:
+        return move_to(turn, role, shop)
+    return buy_upgrade(turn, role, config)
+
+
+def _has_affordable_upgrade(turn: Turn, config: StrategyConfig) -> bool:
+    for item, target_kind in config.upgrade_queue:
+        target = upgrade_unit(turn, target_kind)
+        price = turn.weapon_shop.get(item)
+        if (
+            target is not None
+            and target.level == _required_source_level(item)
+            and price is not None
+            and turn.gold >= price
+        ):
+            return True
+    return False
+
+
+def _has_ore(role: Unit) -> bool:
+    return any(item in {"stone", "iron", "copper"} for item in role.backpack)
+
+
 def _required_source_level(item: str) -> int:
     if item.endswith("Voucher1"):
         return 1

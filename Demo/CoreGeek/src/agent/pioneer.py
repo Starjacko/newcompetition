@@ -51,7 +51,9 @@ def _active_task(turn: Turn, pioneer: Unit, memory: PersistentMemory) -> Pioneer
     memory.remember_sop(memory.task_type or "unknown", output=cmd_output)
     if memory.pioneer_agent_phase == "answering":
         if turn.llm_resp:
-            answer = _extract_answer(turn.llm_resp)
+            # ANSWER: 是首选格式；但接口没有强制 LLM 必须带前缀。
+            # 已经有成功沙盒结果时，非空响应也应作为最终答案提交，避免任务卡在 answering。
+            answer = _extract_answer(turn.llm_resp) or turn.llm_resp.strip()
             if answer:
                 memory.pioneer_agent_phase = "submitted"
                 memory.remember_sop(

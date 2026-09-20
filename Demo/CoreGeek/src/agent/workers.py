@@ -1,6 +1,12 @@
 from .commands import build, collect
 from .config import StrategyConfig
-from .economy import buy_upgrade, move_to, nearest_zone, plan_upgrade, sell_backpack
+from .economy import (
+    move_to,
+    nearest_zone,
+    plan_buy_upgrade,
+    plan_upgrade,
+    sell_backpack,
+)
 from .layout import tower_site, wall_targets
 from .memory import PersistentMemory
 from .protocol import Pos, Turn, Unit, WALL, WEAPON_BUILD_COST, distance, worker_slot
@@ -120,18 +126,13 @@ def _worker2(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
         # 没有找到小贩时不能跳过卖矿直接买券或继续采矿。
         return None
 
-    # 只有当前矿批次已经卖空后，才按队列购买并使用升级券。
+    # 当前矿批次卖空后，先使用已有升级券，再购买下一张可负担的升级券。
     if not has_ore:
         upgrade = plan_upgrade(turn, worker, config)
         if upgrade is not None:
             memory.worker2_phase = "upgrade"
             return upgrade
-
-    if memory.worker2_phase == "sell":
-        shop = nearest_zone(turn, worker, "weaponShop")
-        if shop is not None and distance(worker.pos, shop) > 1:
-            return move_to(turn, worker, shop)
-        bought = buy_upgrade(turn, worker, config)
+        bought = plan_buy_upgrade(turn, worker, config)
         if bought is not None:
             memory.worker2_phase = "buy_upgrade"
             return bought
