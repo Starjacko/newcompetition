@@ -171,11 +171,11 @@ def test_upper_left_wall_targets_have_requested_counts() -> None:
     station = turn.station()
     assert station is not None
     assert len(front) == 6
-    assert len(upper) == 4
-    assert len(lower) == 4
     assert {pos.x for pos in front} == {station.pos.x + 2}
-    assert [pos.x for pos in upper] == list(range(station.pos.x - 1, station.pos.x + 3))
-    assert [pos.x for pos in lower] == list(range(station.pos.x - 1, station.pos.x + 3))
+    assert len(upper) == 8
+    assert len(lower) == 8
+    assert [pos.x for pos in upper] == list(range(station.pos.x - 1, station.pos.x + 7))
+    assert [pos.x for pos in lower] == list(range(station.pos.x - 1, station.pos.x + 7))
     assert {pos.y for pos in upper} == {station.pos.y + 1}
     assert {pos.y for pos in lower} == {station.pos.y - 2}
 
@@ -194,13 +194,40 @@ def test_lower_right_wall_targets_mirror_main_side_and_scan_left_to_right() -> N
     turn = Turn.load(payload)
     front, upper, lower = wall_targets(turn)
     assert len(front) == 6
-    assert len(upper) == 4
-    assert len(lower) == 4
     assert {pos.x for pos in front} == {station["pos"]["x"] - 1}
-    assert [pos.x for pos in upper] == sorted(pos.x for pos in upper)
-    assert [pos.x for pos in lower] == sorted(pos.x for pos in lower)
+    assert len(upper) == 8
+    assert len(lower) == 8
+    assert [pos.x for pos in upper] == list(range(station["pos"]["x"] - 2, station["pos"]["x"] + 6))
+    assert [pos.x for pos in lower] == list(range(station["pos"]["x"] - 2, station["pos"]["x"] + 6))
     assert {pos.y for pos in upper} == {station["pos"]["y"] + 1}
     assert {pos.y for pos in lower} == {station["pos"]["y"] - 2}
+
+
+def test_tower_sites_do_not_overlap_planned_walls() -> None:
+    from agent.layout import tower_site_plan, wall_targets
+    from agent.protocol import Turn
+
+    payload = load_payload()
+    payload["roundNo"] = 1
+    payload["robot"]["roles"] = []
+    payload["teamOur"]["roles"] = [
+        role for role in payload["teamOur"]["roles"]
+        if role["roleType"] not in {"gatling", "railgun", "rocket", "wall"}
+    ]
+    turn = Turn.load(payload)
+    wall_cells = set().union(*wall_targets(turn))
+    plan = tower_site_plan(turn)
+    assert set(plan) == {"rocket", "railgun", "gatling"}
+    assert not set(plan.values()) & wall_cells
+
+
+def test_wall_selection_skips_unavailable_candidates() -> None:
+    from agent.protocol import Pos
+    from agent.workers import _take_missing
+
+    targets = tuple(Pos(x, 10) for x in range(1, 9))
+    selected = _take_missing(targets, {Pos(1, 10), Pos(3, 10)}, 4)
+    assert selected == (Pos(2, 10), Pos(4, 10), Pos(5, 10), Pos(6, 10))
 
 
 def test_weapon_upgrade_queue_skips_already_upgraded_target() -> None:

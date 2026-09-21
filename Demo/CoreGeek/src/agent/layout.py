@@ -34,18 +34,24 @@ def tower_site_plan(turn: Turn) -> dict[str, Pos]:
         return {}
     footprint = station_footprint(station.pos)
     occupied = turn.occupied_cells()
+    planned_walls = set().union(*wall_targets(turn))
     front, back, side = _tower_candidate_groups(turn, footprint)
     plan: dict[str, Pos] = {}
     reserved: set[Pos] = set()
     preferences = {
-        # 火箭射程最长，放在基地背面可以减少第三座塔把正面通路卡死的概率。
+        # 三座塔都先放基地背面：正面留给主攻面围墙，避免塔压墙线或被墙隔在外侧。
         "rocket": back + side + front,
-        "railgun": front + side + back,
-        "gatling": front + side + back,
+        "railgun": back + side + front,
+        "gatling": back + side + front,
     }
     for kind in ("rocket", "railgun", "gatling"):
         for pos in preferences[kind]:
-            if pos in occupied or pos in reserved or not turn.land(pos):
+            if (
+                pos in planned_walls
+                or pos in occupied
+                or pos in reserved
+                or not turn.land(pos)
+            ):
                 continue
             plan[kind] = pos
             reserved.add(pos)
@@ -73,13 +79,17 @@ def wall_targets(turn: Turn) -> tuple[tuple[Pos, ...], tuple[Pos, ...], tuple[Po
             Pos(xmax + 1, y)
             for y in range(ymin - 2, ymax + 3)
         ]
-        horizontal_xs = range(xmin - 1, xmax + 2)
+        # 上下侧墙保留 8 个候选位，workers.py 再按配置取左侧一半，
+        # 这样实际会建设 4 个，而不是“4 个候选再取 50%”只建 2 个。
+        horizontal_xs = range(xmin - 1, xmax + 6)
     else:
         front = [
             Pos(xmin - 1, y)
             for y in range(ymin - 2, ymax + 3)
         ]
-        horizontal_xs = range(xmin - 1, xmax + 2)
+        # 右下基地靠近地图右边界，候选带向左平移，避免最后一个
+        # 候选点越界后只剩 7 个，导致“建设一半”少建一格。
+        horizontal_xs = range(xmin - 2, xmax + 5)
     # 上、下两条侧墙都严格按 x 从小到大生成，随后由 _fraction 取左侧一半。
     upper = sorted([
         Pos(x, ymax + 1)
@@ -106,6 +116,20 @@ def _ring(footprint: tuple[Pos, ...]) -> tuple[Pos, ...]:
     return tuple(result)
 
 
+def _expanded_build_area(footprint: tuple[Pos, ...], radius: int = 3) -> tuple[Pos, ...]:
+    xs = [cell.x for cell in footprint]
+    ys = [cell.y for cell in footprint]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    footprint_set = set(footprint)
+    return tuple(
+        Pos(x, y)
+        for x in range(xmin - radius, xmax + radius + 1)
+        for y in range(ymin - radius, ymax + radius + 1)
+        if Pos(x, y) not in footprint_set
+    )
+
+
 def _tower_candidate_groups(
     turn: Turn,
     footprint: tuple[Pos, ...],
@@ -115,16 +139,16 @@ def _tower_candidate_groups(
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
     middle_y = (ymin + ymax) / 2
-    ring = list(_ring(footprint))
+    candidates = list(_expanded_build_area(footprint))
     if attack_face(turn) == "right":
-        front = [pos for pos in ring if pos.x > xmax]
-        back = [pos for pos in ring if pos.x < xmin]
+        front = [pos for pos in candidates if pos.x > xmax]
+        back = [pos for pos in candidates if pos.x < xmin]
     else:
-        front = [pos for pos in ring if pos.x < xmin]
-        back = [pos for pos in ring if pos.x > xmax]
-    side = [pos for pos in ring if xmin <= pos.x <= xmax]
-    front.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, _face_distance(turn, pos)))
-    back.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, pos.x))
+        front = [pos for pos in candidates if pos.x < xmin]
+        back = [pos for pos in candidates if pos.x > xmax]
+    side = [pos for pos in candidates if xmin <= pos.x <= xmax]
+    front.sort(key=lambda pos: (abs(pos.y - middle_y), _face_distance(turn, pos), pos.y))
+    back.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, _back_distance(turn, pos)))
     side.sort(key=lambda pos: (abs(pos.y - middle_y), pos.y, pos.x))
     return front, back, side
 
@@ -133,6 +157,12 @@ def _face_distance(turn: Turn, pos: Pos) -> int:
     station = turn.station()
     if station is None:
         return 0
+    if attack_face(turn) == "right":
+        return -pos.x
+    return pos.x
+
+
+def _back_distance(turn: Turn, pos: Pos) -> int:
     if attack_face(turn) == "right":
         return -pos.x
     return pos.x

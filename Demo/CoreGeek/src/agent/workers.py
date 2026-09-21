@@ -64,12 +64,21 @@ def _worker1(turn: Turn, worker: Unit, memory: PersistentMemory, config: Strateg
 
     front, upper, lower = wall_targets(turn)
     stages = (
-        ("build_front_wall", front),
-        ("build_upper_wall", _fraction(upper, config.upper_wall_ratio)),
-        ("build_lower_wall", _fraction(lower, config.lower_wall_ratio)),
+        ("build_front_wall", front, 1.0),
+        ("build_upper_wall", upper, config.upper_wall_ratio),
+        ("build_lower_wall", lower, config.lower_wall_ratio),
     )
     built_walls = {unit.pos for unit in turn.walls()}
-    for phase, targets in stages:
+    blocked_build_targets = turn.occupied_cells() - built_walls
+    for phase, all_targets, ratio in stages:
+        # 先去掉已建墙和其他建筑占位，再按比例取目标；这样角点重复、
+        # 旧炮塔压线等情况不会让 worker1 反复发送非法 build。
+        desired_count = max(1, int(len(all_targets) * ratio)) if all_targets else 0
+        targets = _take_missing(
+            all_targets,
+            built_walls | blocked_build_targets,
+            desired_count,
+        )
         missing = [target for target in targets if target not in built_walls]
         if not missing:
             continue
@@ -211,3 +220,15 @@ def _fraction(targets: tuple[Pos, ...], ratio: float) -> tuple[Pos, ...]:
         return ()
     count = max(1, int(len(targets) * ratio))
     return targets[:count]
+
+
+def _take_missing(
+    targets: tuple[Pos, ...],
+    unavailable: set[Pos],
+    count: int,
+) -> tuple[Pos, ...]:
+    """Select stable build targets while skipping walls, towers, and station cells."""
+    if count <= 0:
+        return ()
+    selected = [target for target in targets if target not in unavailable]
+    return tuple(selected[:count])
